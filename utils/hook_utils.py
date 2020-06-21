@@ -3,6 +3,11 @@ from tqdm.auto import tqdm
 
 
 def increment_name(name):
+    """
+    Increments the number appended to the name and returns the resulting string
+    :param name: the name to be incremented
+    :return: the name with its numeric suffix incremented
+    """
     if '_' in name and name.split('_')[-1].isnumeric():
         count = int(name.split('_')[-1]) + 1
         return '_'.join(name.split('_')[:-1]) + '_%d' % count
@@ -10,6 +15,12 @@ def increment_name(name):
 
 
 def find_network_modules_by_name(network, module_names):
+    """
+    Searches the the result of network.named_modules() for the modules specified in module_names and returns them
+    :param network: the network to search
+    :param module_names: List[String] containing the module names to search for
+    :return: List[torch.nn.Module] of modules specified in module_names
+    """
     assert hasattr(network, 'named_modules'), 'Network %s has no attribute named_modules' % repr(network)
     assert len(list(network.named_modules())) > 0, 'Network %s has no modules in it' % repr(network)
     ret_modules = []
@@ -27,18 +38,49 @@ def find_network_modules_by_name(network, module_names):
     return ret_modules
 
 
-def data_pass(loader, network=None, device=0, gradient=True, loss_fn=torch.nn.CrossEntropyLoss()):
+def get_named_modules_from_network(network, include_bn=False):
+    """
+    Returns all modules in network.named_modules() that have a 'weight' attribute as a Dict indexed by module name
+    :param network: the network to search
+    :param include_bn: if True, include BatchNorm layers in the returned Dict
+    :return: Dict[String, torch.nn.Module] containing modules indexed by module name
+    """
+    assert hasattr(network, 'named_modules'), 'Network %s has no attribute named_modules' % repr(network)
+    assert len(list(network.named_modules())) > 0, 'Network %s has no modules in it' % repr(network)
+    ret_modules = {}
+    for name, module in network.named_modules():
+        if not hasattr(module, 'weight'):
+            continue
+        if issubclass(module.__class__, torch.nn._NormBase) and not include_bn:
+            continue
+        ret_modules[name] = module
+
+    return ret_modules
+
+
+def data_pass(loader, network, device=0, backward_fn=None):
+    """
+    Perform a forward-backward pass over all data batches in the passed DataLoader
+    :param loader: torch.utils.data.DataLoader to use
+    :param network: the network to pass data batches through
+    :param device: the device that network is on
+    :param backward_fn: if specified, the result of backward_fn(network(x), y) will be backpropagated for each batch.
+                        Otherwise, no backward pass will be conducted.
+    :return: None
+    """
     context = CustomContext()
-    if not gradient:
+    backward = True
+    if backward_fn is not None:
+        backward = False
         context = torch.no_grad()
 
     with context:
         for i, x, y in tqdm(loader):
             x, y = x.to(device), y.to(device)
             out = network(x)
-            if gradient:
-                loss = loss_fn(out, y)
-                loss.backward()
+            if backward:
+                backward_out = backward_fn(out, y)
+                backward_out.backward()
                 network.zero_grad()
 
 

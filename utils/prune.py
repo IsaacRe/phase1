@@ -1,8 +1,8 @@
 import numpy as np
 from tqdm.auto import tqdm
 import torch
-from vc_utils.activation_tracker import ActivationTracker
-from vc_utils.hook_utils import find_network_modules_by_name
+from utils.activation_tracker import ActivationTracker
+from utils.hook_utils import find_network_modules_by_name
 
 
 class Pruner(ActivationTracker):

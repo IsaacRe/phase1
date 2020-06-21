@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from time import time
-from vc_utils.hook_utils import HookManager, find_network_modules_by_name, data_pass
+from utils.hook_utils import HookManager, find_network_modules_by_name, data_pass
 
 
 class ActivationTracker:
