@@ -1,5 +1,4 @@
-import torch
-from tqdm.auto import tqdm
+from utils.helpers import CustomContext
 
 
 def increment_name(name):
@@ -12,76 +11,6 @@ def increment_name(name):
         count = int(name.split('_')[-1]) + 1
         return '_'.join(name.split('_')[:-1]) + '_%d' % count
     return name + '_1'
-
-
-def find_network_modules_by_name(network, module_names):
-    """
-    Searches the the result of network.named_modules() for the modules specified in module_names and returns them
-    :param network: the network to search
-    :param module_names: List[String] containing the module names to search for
-    :return: List[torch.nn.Module] of modules specified in module_names
-    """
-    assert hasattr(network, 'named_modules'), 'Network %s has no attribute named_modules' % repr(network)
-    assert len(list(network.named_modules())) > 0, 'Network %s has no modules in it' % repr(network)
-    ret_modules = []
-    module_names = set(module_names)
-    all_found = False
-    for name, module in network.named_modules():
-        if name in module_names:
-            ret_modules += [module]
-            module_names.discard(name)
-            if len(module_names) == 0:
-                all_found = True
-                break
-    assert all_found, 'Could not find the following modules in the passed network: %s' % \
-                      ', '.join(module_names)
-    return ret_modules
-
-
-def get_named_modules_from_network(network, include_bn=False):
-    """
-    Returns all modules in network.named_modules() that have a 'weight' attribute as a Dict indexed by module name
-    :param network: the network to search
-    :param include_bn: if True, include BatchNorm layers in the returned Dict
-    :return: Dict[String, torch.nn.Module] containing modules indexed by module name
-    """
-    assert hasattr(network, 'named_modules'), 'Network %s has no attribute named_modules' % repr(network)
-    assert len(list(network.named_modules())) > 0, 'Network %s has no modules in it' % repr(network)
-    ret_modules = {}
-    for name, module in network.named_modules():
-        if not hasattr(module, 'weight'):
-            continue
-        if issubclass(module.__class__, torch.nn._NormBase) and not include_bn:
-            continue
-        ret_modules[name] = module
-
-    return ret_modules
-
-
-def data_pass(loader, network, device=0, backward_fn=None):
-    """
-    Perform a forward-backward pass over all data batches in the passed DataLoader
-    :param loader: torch.utils.data.DataLoader to use
-    :param network: the network to pass data batches through
-    :param device: the device that network is on
-    :param backward_fn: if specified, the result of backward_fn(network(x), y) will be backpropagated for each batch.
-                        Otherwise, no backward pass will be conducted.
-    :return: None
-    """
-    context = CustomContext()
-    backward = True
-    if backward_fn is not None:
-        backward = False
-        context = torch.no_grad()
-
-    with context:
-        for i, x, y in tqdm(loader):
-            x, y = x.to(device), y.to(device)
-            out = network(x)
-            if backward:
-                backward_out = backward_fn(out, y)
-                backward_out.backward()
-                network.zero_grad()
 
 
 def detach_hook(module, inp, out):
@@ -113,7 +42,7 @@ class HookFunction:
             assert hasattr(module, 'name'), 'Module must be given name before hook registration'
             assert module not in self.module_to_handle, \
                 'Hook function %s was already registered with module %s' % (self.name, module.name)
-            name = self.name + '(' + str(len(self.handles)) + ')'
+            name = self.name + '[' + module.name + ']'
             handles += [HookHandle(self, module, name, activate=activate)]
         self.handles += handles
         return handles
@@ -211,24 +140,6 @@ class Hook:
         self.name = name
 
 
-class CustomContext:
-
-    def __init__(self, enter_fns=[], exit_fns=[], handle_exc_vars=False):
-        self.handle_exc_vars = handle_exc_vars
-        self.enter_fns = enter_fns
-        self.exit_fns = exit_fns
-
-    def __enter__(self):
-        for fn in self.enter_fns:
-            fn()
-
-    def __exit__(self, *exc_vars):
-        if not self.handle_exc_vars:
-            exc_vars = []
-        for fn in self.exit_fns:
-            fn(*exc_vars)
-
-
 class HookManager:
     """
     Class for centralized handling of PyTorch module hooks
@@ -240,7 +151,7 @@ class HookManager:
         self.modules = set()
         self.name_to_hookfn = {}  # HookFunction.name -> HookFunction
         self.name_to_hookhandle = {}  # HookHandle.name -> HookHandle
-        self.module_to_hookhandle = {}  # HookHandle.module -> [HookHandle]
+        self.module_to_hookhandle = {}  # HookHandle.module -> List[HookHandle]
         self.name_to_module = {}  # Module.name -> Module
         self.function_to_hookfn = {}  # HookFunction.function -> HookFunction
 
@@ -253,8 +164,10 @@ class HookManager:
         if item.count('_') >= 2 and 'register_' == item[:9]:
             hook_type = '_'.join(item.split('_')[1:])
             if hook_type not in HookFunction.HOOK_TYPES:
-                raise AttributeError('%s object has no attribute %s' % (repr(self), item))
+                raise AttributeError('%s object has no attribute %s' % (self.__class__, item))
             return lambda *args, **kwargs: self.register_hook(hook_type, *args, **kwargs)
+        else:
+            raise AttributeError("'%s' object has no attribute '%s'" % (self.__class__, item))
 
     def register_hook(self, hook_type, function, *modules, hook_fn_name=None,
                       activate=True, **named_modules):
@@ -262,6 +175,8 @@ class HookManager:
         if function in self.function_to_hookfn:
             hook_fn = self.function_to_hookfn[function]
         else:
+            if hook_fn_name in self.name_to_hookfn:
+                hook_fn_name = increment_name(hook_fn_name)
             hook_fn = HookFunction(function, hook_type, name=hook_fn_name)
             self.hook_fns = self.hook_fns.union({hook_fn})
             self.name_to_hookfn[hook_fn.name] = hook_fn
@@ -297,46 +212,65 @@ class HookManager:
     def deactivate_hook_by_name(self, hook_name):
         self.name_to_hookhandle[hook_name].deactivate()
 
-    def get_module_hooks(self, module, hook_types=[], include_inactive=False):
+    def get_module_hooks(self, module, hook_types=[], include_active=True, include_inactive=True):
         for h in self.module_to_hookhandle[module]:
             if len(hook_types) > 0 and h.hook_fn.function not in hook_types:
                 continue
             if not include_inactive and not h.is_active():
+                continue
+            if not include_active and h.is_active():
                 continue
             yield h
 
     def get_module_hooks_by_name(self, module_name, hook_types=[], **kwargs):
         return self.get_module_hooks(self.name_to_module[module_name], hook_types=hook_types, **kwargs)
 
-    def activate_module_hooks(self, module, hook_types=[]):
-        for h in self.get_module_hooks(module, hook_types=hook_types, include_inactive=True):
-            h.activate()
+    def activate_module_hooks(self, *modules, hook_types=[]):
+        for module in modules:
+            for h in self.get_module_hooks(module, hook_types=hook_types, include_active=False):
+                h.activate()
 
-    def activate_module_hooks_by_name(self, module_name, hook_types=[]):
-        self.activate_module_hooks(self.name_to_module[module_name], hook_types=hook_types)
+    def activate_module_hooks_by_name(self, *module_names, hook_types=[]):
+        for module_name in module_names:
+            for h in self.get_module_hooks_by_name(module_name, hook_types=hook_types, include_active=False):
+                h.activate()
 
-    def deactivate_module_hooks(self, module, hook_types=[]):
-        for h in self.get_module_hooks(module, hook_types=hook_types, include_inactive=False):
-            h.deactivate()
+    def deactivate_module_hooks(self, *modules, hook_types=[]):
+        for module in modules:
+            for h in self.get_module_hooks(module, hook_types=hook_types, include_inactive=False):
+                h.deactivate()
 
-    def deactivate_module_hooks_by_name(self, module_name, hook_types=[]):
-        self.deactivate_module_hooks(self.name_to_module[module_name], hook_types=hook_types)
+    def deactivate_module_hooks_by_name(self, *module_names, hook_types=[]):
+        for module_name in module_names:
+            for h in self.get_module_hooks_by_name(module_name, hook_types=hook_types, include_inactive=False):
+                h.deactivate()
 
     def activate_all_hooks(self, hook_types=[]):
-        for module in self.modules:
-            self.activate_module_hooks(module, hook_types=hook_types)
+        self.activate_module_hooks(*self.modules, hook_types=hook_types)
 
     def deactivate_all_hooks(self, hook_types=[]):
-        for module in self.modules:
-            self.deactivate_module_hooks(module, hook_types=hook_types)
+        self.deactivate_module_hooks(*self.modules, hook_types=hook_types)
 
     ########################  Context Management  #######################################
 
-    def hook_all_context(self, hook_types=[], add_enter_fns=[], add_exit_fns=[]):
-        enter_fns = [lambda: self.activate_all_hooks(hook_types=hook_types)]
-        exit_fns = [lambda: self.deactivate_all_hooks(hook_types=hook_types)]
+    def hook_module_context(self, *modules, hook_types=[], add_enter_fns=[], add_exit_fns=[]):
+        enter_fns = [lambda: self.activate_module_hooks(*modules, hook_types=hook_types)]
+        exit_fns = [lambda: self.deactivate_module_hooks(*modules, hook_types=hook_types)]
         for fn in add_enter_fns:
             enter_fns += [fn]
         for fn in add_exit_fns:
             exit_fns += [fn]
         return CustomContext(enter_fns=enter_fns, exit_fns=exit_fns)
+
+    def hook_module_context_by_name(self, *module_names, hook_types=[], add_enter_fns=[], add_exit_fns=[]):
+        modules = [self.name_to_module[module_name] for module_name in module_names]
+        return self.hook_module_context(*modules,
+                                        hook_types=hook_types,
+                                        add_enter_fns=add_enter_fns,
+                                        add_exit_fns=add_exit_fns)
+
+    def hook_all_context(self, hook_types=[], add_enter_fns=[], add_exit_fns=[]):
+        return self.hook_module_context(*self.modules,
+                                        hook_types=hook_types,
+                                        add_enter_fns=add_enter_fns,
+                                        add_exit_fns=add_exit_fns)
