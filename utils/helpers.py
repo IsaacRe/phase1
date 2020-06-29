@@ -39,14 +39,14 @@ def get_named_modules_from_network(network, include_bn=False):
     for name, module in network.named_modules():
         if not hasattr(module, 'weight'):
             continue
-        if issubclass(module.__class__, torch.nn._NormBase) and not include_bn:
+        if type(module) == torch.nn.BatchNorm2d and not include_bn:
             continue
         ret_modules[name] = module
 
     return ret_modules
 
 
-def data_pass(loader, network, device=0, backward_fn=None):
+def data_pass(loader, network, device=0, backward_fn=None, early_stop=None):
     """
     Perform a forward-backward pass over all data batches in the passed DataLoader
     :param loader: torch.utils.data.DataLoader to use
@@ -54,6 +54,8 @@ def data_pass(loader, network, device=0, backward_fn=None):
     :param device: the device that network is on
     :param backward_fn: if specified, the result of backward_fn(network(x), y) will be backpropagated for each batch.
                         Otherwise, no backward pass will be conducted.
+    :param early_stop: if specified, execution will stop after the provided number of batches have
+                       completed. Otherwise, all batches will be processed.
     """
     context = CustomContext()
     backward = True
@@ -62,7 +64,9 @@ def data_pass(loader, network, device=0, backward_fn=None):
         context = torch.no_grad()
 
     with context:
-        for i, x, y in tqdm(loader):
+        for itr, (i, x, y) in enumerate(tqdm(loader)):
+            if early_stop and itr >= early_stop:
+                return
             x, y = x.to(device), y.to(device)
             out = network(x)
             if backward:
@@ -76,7 +80,7 @@ def flatten_activations(activations):
     if len(activations.shape) == 4:
         return activations.transpose(1, 0).flatten(start_dim=1, end_dim=3)
     # if outputs are vectors only need to aggregate over sample dim
-    elif len(activations) == 2:
+    elif len(activations.shape) == 2:
         return activations.transpose(1, 0)
     else:
         raise TypeError('Output type unknown for Tensor: \n%s' % repr(activations))
