@@ -89,7 +89,11 @@ def flatten_activations(activations):
 class CustomContext:
 
     def __init__(self, enter_fns=[], exit_fns=[], handle_exc_vars=False):
-        self.handle_exc_vars = handle_exc_vars
+        if not handle_exc_vars:
+            for i, fn in enumerate(exit_fns):
+                def fn_(*exc_args):
+                    return fn()
+                exit_fns[i] = fn_
         self.enter_fns = enter_fns
         self.exit_fns = exit_fns
 
@@ -98,8 +102,23 @@ class CustomContext:
             fn()
 
     def __exit__(self, *exc_vars):
-        if not self.handle_exc_vars:
-            exc_vars = []
         for fn in self.exit_fns:
             fn(*exc_vars)
 
+    def merge_context(self, context, inplace: bool = False):
+        assert hasattr(context, '__enter__') and hasattr(context, '__exit__'), \
+            "context object '%s' is missing '__enter__' or '__exit__' methods"
+        # if context is CustomContext object, concatenate enter and exit functions directly
+        if type(context) == __class__:
+            enter_fns, exit_fns = context.enter_fns, context.exit_fns
+        else:
+            enter_fns, exit_fns = [context.__enter__], [context.__exit__]
+
+        if inplace:
+            self.enter_fns += enter_fns
+            self.exit_fns += exit_fns
+            return self
+        else:
+            return __class__(enter_fns=self.enter_fns + enter_fns,
+                             exit_fns=self.exit_fns + exit_fns,
+                             handle_exc_vars=True)

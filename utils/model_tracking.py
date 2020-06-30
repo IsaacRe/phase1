@@ -1,8 +1,9 @@
 from torch.nn import Module
 from torch.utils.data import DataLoader
 import torch
-from typing import Type
+from typing import Type, List
 import json
+import warnings
 from utils.hook_management import HookManager
 from utils.helpers import get_named_modules_from_network, find_network_modules_by_name, data_pass
 
@@ -85,15 +86,29 @@ DEFAULT_TRACKING_PROTOCOL = {
 }
 
 
-def validate_var(fn):
-    def new_fn(var, *args, **kwargs):
-        assert var in ALL_VARS, 'Invalid var, %s, passed to tracker.' \
-                                  ' Use a valid var key: %s' % (var, ', '.join(ALL_VARS))
-        return fn(var, *args, **kwargs)
+def validate_vars(var_idx=0, multiple=False, keyword=None, valid_vars=ALL_VARS):
+    def wrapper_fn(fn):
+        def new_fn(*args, **kwargs):
+            if keyword:
+                if keyword in kwargs:
+                    vars_ = kwargs[keyword]
+                else:
+                    vars_ = []
+            else:
+                vars_ = args[var_idx:]
+                if not multiple:
+                    vars_ = vars_[:1]
+            for var in vars_:
+                assert var in valid_vars, 'Invalid var, %s, passed to tracker.' \
+                                          ' Use a valid var key: %s' % (var, ', '.join(valid_vars))
+            return fn(*args, **kwargs)
 
-    return new_fn
+        return new_fn
+
+    return wrapper_fn
 
 
+"""
 def validate_vars(fn):
     def new_fn(*vars, **kwargs):
         for var in vars:
@@ -102,6 +117,7 @@ def validate_vars(fn):
         return fn(*vars, **kwargs)
 
     return new_fn
+"""
 
 
 class TrackingProtocol:
@@ -115,13 +131,13 @@ class TrackingProtocol:
         elif any([self.track_inp, self.track_out]):
             self.track_forward = True
 
-    @validate_vars
-    def __init__(self, *vars, record_every=None, buffer_len=None, protocol_json=None, **overwrite_protocols):
+    @validate_vars(multiple=True)
+    def __init__(self, *vars_, record_every=None, buffer_len=None, protocol_json=None, **overwrite_protocols):
         self.proto_dict = dict(self.DEFAULT_PROTOCOL)
         # track all vars unless specific vars are specified
-        if len(vars) > 0:
+        if len(vars_) > 0:
             for var in ALL_VARS:
-                if var in vars:
+                if var in vars_:
                     continue
                 self.proto_dict['%s_track' % var] = False
         # allow universal record_every specification
@@ -233,73 +249,96 @@ class ModelTracker:
 
 class ModuleTracker:
 
-    def __init__(self, module: Type[Module], hook_manager: HookManager, protocol: TrackingProtocol,
-                 module_name: str = None):
+    def __init__(self, hook_manager: HookManager, protocol: TrackingProtocol, *modules: Module,
+                 **named_modules: Module):
         """
-        Tracks module statistics as learning progresses
-        :param module: torch.nn.Module whose statistics will be tracked
+        Tracks module variables as learning progresses, for a group of modules with a shared tracking protocol
         :param hook_manager: HookManager that will manage hooks for this module
         :param protocol: TrackingProtocol outlining which module vars to track and protocols for tracking them
-        :param module_name: string specifying the name to use for the module for hook registration.
-                            If not specified, the result of __repr__ will be used.
+        :param modules: List[Module] of unnamed modules to be tracked. Name will be assigned to each using __repr__ .
+        :param named_modules: Dict[str, Module] of modules to be tracked, indexed by name
         """
-        self.module = module
-        self.module_name = module_name if module_name else repr(module)
+        self.modules = named_modules
+        for m in modules:
+            self.modules[repr(m)] = m
+        self.module_names = [repr(m) for m in modules] + list(named_modules.keys())
         self.hook_manager = hook_manager
 
+        # counts the number of forward/backward passes that have been executed by each module being tracked
+        self.pass_count = 0
+        self.modules_passed = {n: False for n in self.module_names}
         self.protocol = protocol
         self.register_all()
 
         # initialize buffers for tracked vars
         self.data_buffer = {
-            var: [] for var in ALL_VARS if self.protocol['track_%s' % var]
+            module_name: {
+                var: [] for var in ALL_VARS if self.protocol['track_%s' % var]
+            } for module_name in self.module_names
         }
 
-        # set up reference to tracker object
-        module.tracker = self
+        # set up references to tracker object
+        for module in self.modules.values():
+            module.tracker = self
 
-    def _insert_data(self, var, data):
-        self.data_buffer[var] += [data]
+    def _reset_modules_passed(self):
+        self.modules_passed = {n: False for n in self.module_names}
+
+    def _begin_module_pass(self, module_name):
+        if self.modules_passed[module_name]:
+            if not all(self.modules_passed.values()):
+                warnings.warn('Some modules are not being tracked! Check proper usage')
+            self.pass_count += 1
+            self._reset_modules_passed()
+        self.modules_passed[module_name] = True
+
+    def _cleanup_tracking(self):
+        self.pass_count = 0
+        self._reset_modules_passed()
+
+    def _insert_module_data(self, module_name, var, data):
+        self.data_buffer[module_name][var] += [data]
 
     def _do_collect(self, var):
-        return self.protocol['track_%s' % var]
+        return self.protocol['track_%s' % var] and self.pass_count % self.protocol['record_every_%s' % var] == 0
 
-    def collect_weight(self):
-        return self.module.weight.data.cpu()
+    def collect_weight(self, module_name):
+        return self.modules[module_name].weight.data.cpu()
 
-    def collect_bias(self):
-        return self.module.bias.data.cpu()
+    def collect_bias(self, module_name):
+        return self.modules[module_name].bias.data.cpu()
 
     def forward_hook(self, module, inp, out):
+        self._begin_module_pass(module.name)
         if self._do_collect('inp'):
-            self._insert_data('inp', inp.data.cpu())
+            self._insert_module_data('inp', module.name, inp.data.cpu())
         if self._do_collect('out'):
-            self._insert_data('out', out.data.cpu())
+            self._insert_module_data('out', module.name, out.data.cpu())
         # we collect w, b during forward pass since forward pass is minimum requirement for module execution
         if self._do_collect('w'):
-            self._insert_data('w', self.collect_weight())
+            self._insert_module_data('w', module.name, self.collect_weight(module.name))
         if self._do_collect('b'):
-            self._insert_data('b', self.collect_bias())
+            self._insert_module_data('b', module.name, self.collect_bias(module.name))
 
     def backward_hook(self, module, grad_in, grad_out):
         if self._do_collect('inp_grad'):
-            self._insert_data('inp_grad', grad_in.cpu())
+            self._insert_module_data('inp_grad', module.name, grad_in.cpu())
         if self._do_collect('out_grad'):
-            self._insert_data('out_grad', grad_out.cpu())
+            self._insert_module_data('out_grad', module.name, grad_out.cpu())
         if self._do_collect('w_grad'):
-            self._insert_data('w_grad', module.weight.grad.cpu())
+            self._insert_module_data('w_grad', module.name, module.weight.grad.cpu())
         if self._do_collect('b_grad'):
-            self._insert_data('b_grad', module.bias.grad.cpu())
+            self._insert_module_data('b_grad', module.name, module.bias.grad.cpu())
 
     def register_forward(self):
-        self.hook_manager.register_forward_hook(self.forward_hook, self.module,
-                                                hook_fn_name='ModuleTracker[%s].forward_hook' % self.module_name,
-                                                activate=False, **{self.module_name: self.module})
+        self.hook_manager.register_forward_hook(self.forward_hook,
+                                                hook_fn_name='ModuleTracker.forward_hook',
+                                                activate=False, **self.modules)
 
     def register_backward(self):
         self.hook_manager.register_backward_hook(self.backward_hook,
-                                                 hook_fn_name='ModuleTracker[%s].backward_hook' % self.module_name,
-                                                 activate=False, **{self.module_name: self.module})
+                                                 hook_fn_name='ModuleTracker.backward_hook',
+                                                 activate=False, **self.modules)
 
     def register_all(self):
         if self.protocol.track_forward:
@@ -307,14 +346,23 @@ class ModuleTracker:
         if self.protocol.track_backward:
             self.register_backward()
 
-    @validate_var
-    def clear_data_buffer_var(self, var):
-        self.data_buffer[var] = []
+    @validate_vars(keyword='vars_')
+    def clear_data_buffer_module(self, *module_name: str, vars_: List[str] = None):
+        if not vars_:
+            vars_ = self.data_buffer[module_name].keys()
+        for var in vars_:
+            self.data_buffer[module_name][var] = []
 
-    def clear_data_buffer_all(self):
-        for var in self.data_buffer:
-            self.data_buffer[var] = []
+    def clear_data_buffer_all(self, vars_: List[str] = None):
+        self.clear_data_buffer_module(*self.module_names, vars_=vars_)
 
-    @validate_var
-    def gather_var(self, var):
-        return torch.cat(self.data_buffer[var], dim=0)
+    @validate_vars(var_idx=1, valid_vars=['inp', 'out', 'grad_inp', 'grad_out'])
+    def gather_module_var(self, module_name, var):
+        return torch.cat(self.data_buffer[module_name][var], dim=0)
+
+    def track(self, clear_on_exit: bool = True):
+        # set module to increment count
+        exit_fns = [self._cleanup_tracking]
+        if clear_on_exit:
+            exit_fns += [lambda: self.clear_data_buffer_module(*self.module_names)]
+        return self.hook_manager.hook_module_context_by_name(*self.module_names)
