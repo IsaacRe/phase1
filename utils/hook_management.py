@@ -1,4 +1,5 @@
 from utils.helpers import CustomContext
+from torch import Tensor
 
 
 def increment_name(name):
@@ -103,6 +104,67 @@ class HookManager:
         self.name_to_module = {}  # Module.name -> Module
         self.function_to_hookfn = {}  # HookFunction.function -> HookFunction
 
+        self.num_module_inputs = {}  # tracks the number of inputs to each module during the forward pass
+        self.input_grad_cache = {}  # caches intermediate gradient tensors of module inputs
+        self.output_grad_cache = {}  # caches intermediate gradient tensors of module outputs
+
+    def _execute_forward_pre_hooks(self, module, inp):
+        for function in self.get_module_hooks(module, category='forward_pre_hook'):
+            ret = function(module, inp)
+            if type(ret) == Tensor:
+                ret = (ret,)
+            if ret is not None:
+                inp = ret
+
+        return inp
+
+    def _execute_forward_hooks(self, module, inp, out):
+        for function in self.get_module_hooks(module, category='forward_hook'):
+            ret = function(module, out)
+            if type(ret) == Tensor:
+                ret = (ret,)
+            if ret is not None:
+                out = ret
+
+        return out
+
+    def _execute_backward_hooks(self, module, grad_in, grad_out):
+        for function in self.get_module_hooks(module, category='backward_hook'):
+            ret = function(module, grad_in, grad_out)
+            if type(ret) == Tensor:
+                ret = (ret,)
+            if ret is not None:
+                grad_in = ret
+
+        return grad_in
+
+    def _maybe_execute_backward_hooks(self, module):
+        if len(self.input_grad_cache[module.name]) == self.num_module_inputs[module.name]:
+            # TODO this currently doesnt allow for modification of gradient during backward pass
+            self._execute_backward_hooks(module, tuple(self.input_grad_cache[module.name]),
+                                         self.output_grad_cache[module.name])
+
+    def _make_collect_grad_hook(self, module, input=False):
+
+        def backward_hook(grad):
+            if input:
+                self.input_grad_cache[module.name] += [grad]
+            else:
+                self.output_grad_cache[module.name] = grad
+            self._maybe_execute_backward_hooks(module)
+
+        return backward_hook
+
+    def _forward_pre_hook_base(self, module, inputs):
+        self.num_module_inputs[module.name] = len(inputs)
+        for inp in inputs:
+            inp.register_hook(self._make_collect_grad_hook(module), input=True)
+        return self._execute_forward_pre_hooks(module, inputs)
+
+    def _forward_hook_base(self, module, inputs, out):
+        out.register_hook(self._make_collect_grad_hook(module), input=False)
+        self._execute_forward_hooks(module, inputs, out)
+
     def register_hook(self, hook_type, function, *modules, hook_fn_name=None,
                       activate=True, **named_modules):
         # Check if HookFunction obj has already been created for the given function
@@ -162,9 +224,11 @@ class HookManager:
     def deactivate_hook_by_name(self, hook_name):
         self.name_to_hookhandle[hook_name].deactivate()
 
-    def get_module_hooks(self, module, hook_types=[], include_active=True, include_inactive=True):
+    def get_module_hooks(self, module, hook_types=[], category='all', include_active=True, include_inactive=True):
         for h in self.module_to_hookhandle[module]:
             if len(hook_types) > 0 and h.hook_fn.function not in hook_types:
+                continue
+            if category != 'all' and category != h.hook_fn.hook_type:
                 continue
             if not include_inactive and not h.is_active():
                 continue
