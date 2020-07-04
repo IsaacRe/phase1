@@ -5,7 +5,7 @@ from typing import Type, List
 import json
 import warnings
 from utils.hook_management import HookManager
-from utils.helpers import get_named_modules_from_network, find_network_modules_by_name, data_pass
+from utils.helpers import get_named_modules_from_network, find_network_modules_by_name, data_pass, Protocol
 
 
 # TODO create separate data class for probing purposes
@@ -38,12 +38,14 @@ def probe(dataloader: Type[DataLoader], model: Type[Module], *var_names, device=
     return var_data
 
 
-# lists of vars that can be tracked
+# list all of all module vars
 ALL_VARS = ['w', 'b', 'inp', 'out', 'w_grad', 'b_grad', 'inp_grad', 'out_grad']
 STATE_VARS = ['w', 'b']  # vars that can be queried at any time
 STATE_GRAD_VARS = ['w_grad', 'b_grad']  # gradients of state vars
 FORWARD_VARS = ['inp', 'out']  # vars that require a forward pass
 BACKWARD_VARS = ['inp_grad', 'out_grad']  # vars that require a backward pass
+# vars whose values are dependent on the data stream
+DATA_DEPENDENT_VARS = ['inp', 'out', 'w_grad', 'b_grad', 'inp_grad', 'out_grad']
 
 GRAPH_VARS = ['inp', 'out', 'inp_grad', 'out_grad']  # vars existing solely within the computation graph
 
@@ -121,11 +123,13 @@ def validate_vars(fn):
 """
 
 
-class TrackingProtocol:
+class TrackingProtocol(Protocol):
+
+    DEFAULT_PROTOCOL = DEFAULT_TRACKING_PROTOCOL
 
     @validate_vars(var_idx=1, multiple=True)
-    def __init__(self, *vars_, record_every=None, buffer_len=None, protocol_json=None, **overwrite_protocols):
-        self._set_proto_dict()
+    def __init__(self, *vars_, record_every=None, buffer_len=None, protocol_json=None, **overwrite_protocol):
+        super(TrackingProtocol, self).__init__()
         # track only the vars specified
         for var in ALL_VARS:
             if var in vars_:
@@ -143,36 +147,12 @@ class TrackingProtocol:
                     self.proto_dict[protocol] = buffer_len
         # allow protocol to be loaded from a specified file
         if protocol_json:
-            protocol_dict = json.load(open(protocol_json, 'r'))
-            for protocol, value in protocol_dict.items():
-                self.proto_dict[protocol] = value
+            self._add_from_json(protocol_json)
         # allow specification of specific vars
-        for protocol, value in overwrite_protocols.items():
-            self.proto_dict[protocol] = value
+        self._add_protocol(**overwrite_protocol)
         # set hook requirements
         self['track_forward'], self['track_backward'] = False, False
         self._set_forward_backward()
-
-    def __iter__(self):
-        return iter(self.proto_dict)
-
-    def __getitem__(self, item):
-        return self.proto_dict[item]
-
-    def __setitem__(self, key, value):
-        self.proto_dict[key] = value
-
-    def __getattr__(self, item):
-        return self.proto_dict[item]
-
-    def __setattr__(self, key, value):
-        if hasattr(self, 'proto_dict') and key in self.proto_dict:
-            self.proto_dict[key] = value
-        else:
-            self.__dict__[key] = value
-
-    def _set_proto_dict(self):
-        self.__dict__['proto_dict'] = dict(DEFAULT_TRACKING_PROTOCOL)
 
     def _set_forward_backward(self):
         track_forward = False
@@ -182,15 +162,6 @@ class TrackingProtocol:
         if any([self.track_w, self.track_b, self.track_inp, self.track_out]):
             track_forward = True
         self.track_forward, self.track_backward = track_forward, track_backward
-
-    def keys(self):
-        return self.proto_dict.keys()
-
-    def values(self):
-        return self.proto_dict.values()
-
-    def items(self):
-        return self.proto_dict.items()
 
 
 class ModelTracker:
@@ -265,8 +236,8 @@ class ModelTracker:
 
 class ModuleTracker:
 
-    def __init__(self, hook_manager: HookManager, protocol: TrackingProtocol, *modules: Module,
-                 **named_modules: Module):
+    def __init__(self, protocol: TrackingProtocol, *modules: Module,
+                 hook_manager: HookManager = None, **named_modules: Module):
         """
         Tracks module variables as learning progresses, for a group of modules with a shared tracking protocol
         :param hook_manager: HookManager that will manage hooks for this module
@@ -274,11 +245,14 @@ class ModuleTracker:
         :param modules: List[Module] of unnamed modules to be tracked. Name will be assigned to each using __repr__ .
         :param named_modules: Dict[str, Module] of modules to be tracked, indexed by name
         """
+        if hook_manager is None:
+            hook_manager = HookManager()
+        self.hook_manager = hook_manager
+
         self.modules = named_modules
         for m in modules:
             self.modules[repr(m)] = m
-        self.module_names = [repr(m) for m in modules] + list(named_modules.keys())
-        self.hook_manager = hook_manager
+        self.module_names = list(self.modules)
 
         # counts the number of forward/backward passes that have been executed by each module being tracked
         self.pass_count = 0
@@ -345,27 +319,29 @@ class ModuleTracker:
                                  "before zero_grad." % module_name
         return grad.cpu()
 
+    #TODO
+    #def aggregate_vars(self, dataloader: DataLoader, ):
+
     ################################################################################
 
-    def _make_tensor_backward_hook(self, module, grad_in=True):
-        var = 'inp_grad' if grad_in else 'out_grad'
-        end_backward = not (grad_in and self._do_collect('out_grad'))
-
+    def _make_input_backward_hook(self, module):
         def backward_hook(grad):
-            self._insert_module_data(module.name, var, grad.cpu())
-            if end_backward:
-                self._complete_module_backward(module.name)
+            print('\n\n\n\n\nIn input hook for module %s' % module.name)
 
         return backward_hook
 
-    def _register_tensor_backward_hook(self, module, tensor, input_var=True):
-        if not tensor.requires_grad:
-            tensor.requires_grad = True
-        tensor.register_hook(self._make_tensor_backward_hook(module, grad_in=input_var))
+    def _make_output_backward_hook(self, module):
+        def backward_hook(grad):
+            print('\n\n\n\n\nIn output hook for module %s' % module.name)
+
+        return backward_hook
 
     def forward_pre_hook(self, module, inp):
         (inp,) = inp
-        self._register_tensor_backward_hook(module, inp, input_var=True)
+        # set require_grad to True for the network input
+        if not inp.requires_grad:
+            inp.requires_grad = True
+        #inp.register_hook(self._make_input_backward_hook(module))
 
     ################################################################################
 
@@ -376,49 +352,54 @@ class ModuleTracker:
             self._insert_module_data(module.name, 'inp', inp.data.cpu())
         if self._do_collect('out'):
             self._insert_module_data(module.name, 'out', out.data.cpu())
+        if self._do_collect('w'):
+            self._insert_module_data(module.name, 'w', self.collect_weight(module.name))
+        if self._do_collect('b'):
+            self._insert_module_data(module.name, 'b', self.collect_bias(module.name))
 
         # setup backward hook for collection of module's output gradient
-        if self._do_collect('out_grad'):
-            self._register_tensor_backward_hook(module, out, input_var=False)
+        #out.register_hook(self._make_output_backward_hook(module))
 
         self._complete_module_forward(module.name)
 
     def backward_hook(self, module, grad_in, grad_out):
-        print('\n\n\n\n\n\n\n\n')
-        print(module.name)
-        print(len(grad_in), len(grad_out))
-        print('IN')
-        for i in range(len(grad_in)):
-            if grad_in[i] is None:
-                print('NONE')
-            else:
-                print(grad_in[i].shape)
-        print('OUT')
-        for i in range(len(grad_out)):
-            if grad_out[i] is None:
-                print('NONE')
-            else:
-                print(grad_out[i].shape)
-        grad_in, grad_out = grad_in[0], grad_out[0]
+        if False:
+            print('\n\n\n\n\n\n\n\n')
+            print(module.name)
+            print(len(grad_in), len(grad_out))
+            print('IN')
+            for i in range(len(grad_in)):
+                if grad_in[i] is None:
+                    print('NONE')
+                else:
+                    print(grad_in[i].shape)
+            print('OUT')
+            for i in range(len(grad_out)):
+                if grad_out[i] is None:
+                    print('NONE')
+                else:
+                    print(grad_out[i].shape)
+
+        grad_in, grad_w, grad_b = grad_in
+        (grad_out,) = grad_out
 
         if self._do_collect('inp_grad'):
             self._insert_module_data(module.name, 'inp_grad', grad_in.cpu())
         if self._do_collect('out_grad'):
             self._insert_module_data(module.name, 'out_grad', grad_out.cpu())
-        #if self._do_collect('w_grad'):
-        #    self._insert_module_data(module.name, 'w_grad', module.weight.grad.cpu())
-        #if self._do_collect('b_grad'):
-        #    self._insert_module_data(module.name, 'b_grad', module.bias.grad.cpu())
+        if self._do_collect('w_grad'):
+            self._insert_module_data(module.name, 'w_grad', grad_w.cpu())
+        if self._do_collect('b_grad'):
+            self._insert_module_data(module.name, 'b_grad', grad_b.cpu())
         self._complete_module_backward(module.name)
 
     def register_forward(self):
         self.hook_manager.register_forward_hook(self.forward_hook,
                                                 hook_fn_name='ModuleTracker.forward_hook',
                                                 activate=False, **self.modules)
-        if self._do_collect('inp_grad'):
-            self.hook_manager.register_forward_pre_hook(self.forward_pre_hook,
-                                                        hook_fn_name='ModuleTracker.forward_pre_hook',
-                                                        activate=False, **self.modules)
+        self.hook_manager.register_forward_pre_hook(self.forward_pre_hook,
+                                                    hook_fn_name='ModuleTracker.forward_pre_hook',
+                                                    activate=False, **self.modules)
 
     def register_backward(self):
         self.hook_manager.register_backward_hook(self.backward_hook,
@@ -428,6 +409,7 @@ class ModuleTracker:
     def register_all(self):
         if any([self._do_collect(var) for var in GRAPH_VARS]):
             self.register_forward()
+        self.register_backward()
 
     @validate_vars(keyword='vars_')
     def clear_data_buffer_module(self, *module_names: str, vars_: List[str] = None):
@@ -445,8 +427,7 @@ class ModuleTracker:
         return torch.cat(self.data_buffer[module_name][var], dim=0)
 
     def track(self, clear_on_exit: bool = True):
-        # set module to increment count
         exit_fns = [self._cleanup_tracking]
         if clear_on_exit:
-            exit_fns += [lambda: self.clear_data_buffer_all()]
+            exit_fns += [self.clear_data_buffer_all]
         return self.hook_manager.hook_all_context(add_exit_fns=exit_fns)

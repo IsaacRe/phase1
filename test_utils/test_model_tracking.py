@@ -90,26 +90,28 @@ class TrackingProtocolTestCase(unittest.TestCase):
 class ModuleTrackerTestCase(unittest.TestCase):
 
     dataloader = load_dataloader()
-    protocol = TrackingProtocol(*ALL_VARS)
+    NO_BIAS = ['w', 'inp', 'out', 'w_grad', 'inp_grad', 'out_grad']
+    protocol = TrackingProtocol(*NO_BIAS)
 
     def setUp(self) -> None:
         self.network = load_network()
         self.modules = {
             'conv1': get_module(self.network, 'conv1'),
             'layer1.0.conv1': get_module(self.network, 'layer1.0.conv1'),
-            'layer4.2.conv2': get_module(self.network, 'layer4.2.conv2')
+            'layer4.2.conv2': get_module(self.network, 'layer4.2.conv2'),
+            'fc': get_module(self.network, 'fc')
         }
         self.hook_manager = HookManager()
 
     def test_collect_weight(self):
-        tracker = ModuleTracker(self.hook_manager, self.protocol,
+        tracker = ModuleTracker(self.protocol, hook_manager=self.hook_manager,
                                 **self.modules)
         for name, module in self.modules.items():
             weight = tracker.collect_weight(name)
             self.assertTrue(np.all((weight == module.weight.data.cpu()).numpy()))
 
     def test_collect_bias(self):
-        tracker = ModuleTracker(self.hook_manager, self.protocol,
+        tracker = ModuleTracker(self.protocol, hook_manager=self.hook_manager,
                                 **self.modules)
         fake_b = torch.nn.Parameter(torch.zeros(2))
         for name, module in self.modules.items():
@@ -118,7 +120,7 @@ class ModuleTrackerTestCase(unittest.TestCase):
             self.assertTrue(np.all((bias == module.bias.data.cpu()).numpy()))
 
     def test_register_all(self):
-        tracker = ModuleTracker(self.hook_manager, self.protocol,
+        tracker = ModuleTracker(self.protocol, hook_manager=self.hook_manager,
                                 **self.modules)
         for name, module in self.modules.items():
             self.assertIn(name, self.hook_manager.name_to_module)
@@ -130,17 +132,15 @@ class ModuleTrackerTestCase(unittest.TestCase):
                 self.assertEqual(len(tracker.data_buffer[name][var]), length)
 
     def test_hooks(self):
-
-        tracker = ModuleTracker(self.hook_manager, self.protocol,
+        tracker = ModuleTracker(self.protocol, hook_manager=self.hook_manager,
                                 **self.modules)
         self.hook_manager.activate_all_hooks()
         data_pass(self.dataloader, self.network, device=0, backward_fn=CrossEntropyLoss(), early_stop=1)
 
-        self._check_len_var_buffer(tracker, 1, *GRAPH_VARS)
-        self._check_len_var_buffer(tracker, 0, *(STATE_VARS + STATE_GRAD_VARS))
+        self._check_len_var_buffer(tracker, 1, *self.NO_BIAS)
 
     def test_clear_data_buffer_all(self):
-        tracker = ModuleTracker(self.hook_manager, self.protocol,
+        tracker = ModuleTracker(self.protocol, hook_manager=self.hook_manager,
                                 **self.modules)
         self.hook_manager.activate_all_hooks()
         data_pass(self.dataloader, self.network, device=0, backward_fn=CrossEntropyLoss(), early_stop=1)
@@ -152,20 +152,20 @@ class ModuleTrackerTestCase(unittest.TestCase):
         self._check_len_var_buffer(tracker, 1, *['out', 'out_grad'])
 
         tracker.clear_data_buffer_all()
-        self._check_len_var_buffer(tracker, 0, *ALL_VARS)
+        self._check_len_var_buffer(tracker, 0, *self.NO_BIAS)
 
     def test_track(self):
-        tracker = ModuleTracker(self.hook_manager, self.protocol,
+        tracker = ModuleTracker(self.protocol, hook_manager=self.hook_manager,
                                 **self.modules)
         with tracker.track():
             data_pass(self.dataloader, self.network, device=0, backward_fn=CrossEntropyLoss(), early_stop=1)
 
-            self._check_len_var_buffer(tracker, 1, *GRAPH_VARS)
+            self._check_len_var_buffer(tracker, 1, *self.NO_BIAS)
 
-        self._check_len_var_buffer(tracker, 0, *ALL_VARS)
+        self._check_len_var_buffer(tracker, 0, *self.NO_BIAS)
 
     def test_gather_module_var(self):
-        tracker = ModuleTracker(self.hook_manager, self.protocol,
+        tracker = ModuleTracker(self.protocol, hook_manager=self.hook_manager,
                                 **self.modules)
         self.hook_manager.activate_all_hooks()
         data_pass(self.dataloader, self.network, device=0, backward_fn=CrossEntropyLoss(), early_stop=2)

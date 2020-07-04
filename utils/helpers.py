@@ -1,3 +1,4 @@
+import json
 import torch
 from tqdm.auto import tqdm
 
@@ -46,7 +47,8 @@ def get_named_modules_from_network(network, include_bn=False):
     return ret_modules
 
 
-def data_pass(loader, network, device=0, backward_fn=None, early_stop=None):
+def data_pass(loader, network, device=0, backward_fn=None, early_stop=None,
+              pre_backward_hooks=[], pre_zero_grad_hooks=[]):
     """
     Perform a forward-backward pass over all data batches in the passed DataLoader
     :param loader: torch.utils.data.DataLoader to use
@@ -56,6 +58,9 @@ def data_pass(loader, network, device=0, backward_fn=None, early_stop=None):
                         Otherwise, no backward pass will be conducted.
     :param early_stop: if specified, execution will stop after the provided number of batches have
                        completed. Otherwise, all batches will be processed.
+    :param pre_backward_hooks: List[function] of functions to be executed before backward() is called
+    :param pre_zero_grad_hooks: List[function] of functions to be executed before zero_grad() is called
+                                only if backward_fn is set and backward() is called
     """
     context = CustomContext()
     backward = True
@@ -69,9 +74,19 @@ def data_pass(loader, network, device=0, backward_fn=None, early_stop=None):
                 return
             x, y = x.to(device), y.to(device)
             out = network(x)
+
+            # call hook methods
+            for fn in pre_backward_hooks:
+                fn()
+
             if backward:
                 backward_out = backward_fn(out, y)
                 backward_out.backward()
+
+                # call hook methods
+                for fn in pre_zero_grad_hooks:
+                    fn()
+
                 network.zero_grad()
 
 
@@ -122,3 +137,55 @@ class CustomContext:
             return __class__(enter_fns=self.enter_fns + enter_fns,
                              exit_fns=self.exit_fns + exit_fns,
                              handle_exc_vars=True)
+
+
+class Protocol:
+
+    DEFAULT_PROTOCOL = None
+
+    def __init__(self, **overwrite_protocol):
+        self._set_proto_dict()
+
+    def __iter__(self):
+        return iter(self.proto_dict)
+
+    def __getitem__(self, item):
+        return self.proto_dict[item]
+
+    def __setitem__(self, key, value):
+        self.proto_dict[key] = value
+
+    def __getattr__(self, item):
+        return self.proto_dict[item]
+
+    def __setattr__(self, key, value):
+        if hasattr(self, 'proto_dict') and key in self.proto_dict:
+            self.proto_dict[key] = value
+        else:
+            self.__dict__[key] = value
+
+    def _set_proto_dict(self):
+        if self.DEFAULT_PROTOCOL is None:
+            raise TypeError("cannot create object of abstract class 'Protocol'")
+        self.__dict__['proto_dict'] = dict(self.DEFAULT_PROTOCOL)
+
+    def _add_protocol(self, **overwrite_protocol):
+        for protocol, value in overwrite_protocol.items():
+            assert protocol in self.proto_dict, "cannot overwrite protocol '%s'. '%s' is not contained" \
+                                                " in proto_dict." % (protocol, protocol)
+            self.proto_ditc[protocol] = value
+
+    def _add_from_json(self, json_file):
+        protocol_dict = json.load(open(json_file, 'r'))
+        for protocol, value in protocol_dict.items():
+            self.proto_dict[protocol] = value
+
+    def keys(self):
+        return self.proto_dict.keys()
+
+    def values(self):
+        return self.proto_dict.values()
+
+    def items(self):
+        return self.proto_dict.items()
+
