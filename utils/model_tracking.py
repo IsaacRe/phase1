@@ -8,36 +8,6 @@ from utils.hook_management import HookManager
 from utils.helpers import get_named_modules_from_network, find_network_modules_by_name, data_pass, Protocol
 
 
-# TODO create separate data class for probing purposes
-def probe(dataloader: Type[DataLoader], model: Type[Module], *var_names, device=0,
-          backward_fn=torch.nn.CrossEntropyLoss(), **module_vars):
-    if len(module_vars) > 0:
-        module_protocols = {n: TrackingProtocol(*vs, buffer_len=len(dataloader), track_w=False, track_b=False) \
-                            for n, vs in module_vars.items()}
-        model_tracker = ModelTracker(model, **module_protocols)
-    else:
-        assert len(var_names) > 0, 'Must specify vars for all modules as positional arguments or ' \
-                                   'vars for specified modules as keyword arguments'
-        model_tracker = ModelTracker(model, protocol=TrackingProtocol(*var_names, buffer_len=len(dataloader),
-                                                                      track_w=False, track_b=False))
-    var_data = {}
-    if model_tracker.require_forward:
-        if not model_tracker.require_backward:
-            backward_fn = None
-        with model_tracker.track():
-            data_pass(dataloader, model, device=device, backward_fn=backward_fn)
-            for v in var_names:
-                if v not in STATE_VARS:
-                    var_data[v] = model_tracker.gather_var(v)
-
-    if 'w' in var_names:
-        var_data['w'] = model_tracker.gather_weight()
-    if 'b' in var_names:
-        var_data['b'] = model_tracker.gather_bias()
-
-    return var_data
-
-
 # list all of all module vars
 ALL_VARS = ['w', 'b', 'inp', 'out', 'w_grad', 'b_grad', 'inp_grad', 'out_grad']
 STATE_VARS = ['w', 'b']  # vars that can be queried at any time
@@ -167,14 +137,18 @@ class TrackingProtocol(Protocol):
 class ModuleTracker:
 
     def __init__(self, protocol: TrackingProtocol, *modules: Module,
-                 hook_manager: HookManager = None, **named_modules: Module):
+                 hook_manager: HookManager = None, network: Module = None,
+                 **named_modules: Module):
         """
         Tracks module variables as learning progresses, for a group of modules with a shared tracking protocol
         :param hook_manager: HookManager that will manage hooks for this module
         :param protocol: TrackingProtocol outlining which module vars to track and protocols for tracking them
         :param modules: List[Module] of unnamed modules to be tracked. Name will be assigned to each using __repr__ .
+        :param network: Module representing the full network containing the passed modules. Used in aggregate_vars.
         :param named_modules: Dict[str, Module] of modules to be tracked, indexed by name
         """
+        self.network = network
+
         if hook_manager is None:
             hook_manager = HookManager()
         self.hook_manager = hook_manager
@@ -308,12 +282,32 @@ class ModuleTracker:
     def clear_data_buffer_all(self, vars_: List[str] = None):
         self.clear_data_buffer_module(*self.module_names, vars_=vars_)
 
-    @validate_vars(var_idx=2, valid_vars=['inp', 'out', 'inp_grad', 'out_grad'])
+    @validate_vars(var_idx=2, valid_vars=DATA_DEPENDENT_VARS)
     def gather_module_var(self, module_name, var):
         return torch.cat(self.data_buffer[module_name][var], dim=0)
+
+    def gather_module_data(self, module_name):
+        return {var: torch.cat(data, dim=0) for var, data in self.data_buffer[module_name].items()}
+
+    def gather_var_data(self, var_name):
+        return {module_name: torch.cat(self.data_buffer[module_name][var_name], dim=0)
+                for module_name in self.data_buffer}
+
+    def gather_data(self):
+        return {module_name: self.gather_module_data(module_name) for module_name in self.data_buffer}
 
     def track(self, clear_on_exit: bool = True):
         exit_fns = [self._cleanup_tracking]
         if clear_on_exit:
             exit_fns += [self.clear_data_buffer_all]
         return self.hook_manager.hook_all_context(add_exit_fns=exit_fns)
+
+    def aggregate_vars(self, dataloader: DataLoader, network: Module = None, device: int = 0):
+        if network is None:
+            assert self.network is not None, "network must be passed to aggregate_vars if one" \
+                                             " was not passed to __init__"
+            network = self.network
+        backward_fn = torch.nn.CrossEntropyLoss() if self.protocol.track_backward else None
+        with self.track():
+            data_pass(dataloader, network, device=device, backward_fn=backward_fn)
+            return self.gather_data()
