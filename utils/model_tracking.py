@@ -345,13 +345,14 @@ class ModuleTracker:
 
     ################################################################################
 
-    def forward_hook(self, module, inp, out):
-        (inp,) = inp
+    # TODO modify to allow tracking for modules with multiple inputs
+    def forward_hook(self, module, input, output):
+        (inp,) = input
 
         if self._do_collect('inp'):
             self._insert_module_data(module.name, 'inp', inp.data.cpu())
         if self._do_collect('out'):
-            self._insert_module_data(module.name, 'out', out.data.cpu())
+            self._insert_module_data(module.name, 'out', output.data.cpu())
         if self._do_collect('w'):
             self._insert_module_data(module.name, 'w', self.collect_weight(module.name))
         if self._do_collect('b'):
@@ -362,7 +363,7 @@ class ModuleTracker:
 
         self._complete_module_forward(module.name)
 
-    def backward_hook(self, module, grad_in, grad_out):
+    def backward_hook(self, module, grad_in, grad_weight, grad_bias, grad_out):
         if False:
             print('\n\n\n\n\n\n\n\n')
             print(module.name)
@@ -380,26 +381,25 @@ class ModuleTracker:
                 else:
                     print(grad_out[i].shape)
 
-        grad_in, grad_w, grad_b = grad_in
-        (grad_out,) = grad_out
+        if len(grad_in) == 0:
+            print(module.name)
+        (grad_in,) = grad_in
 
         if self._do_collect('inp_grad'):
             self._insert_module_data(module.name, 'inp_grad', grad_in.cpu())
         if self._do_collect('out_grad'):
             self._insert_module_data(module.name, 'out_grad', grad_out.cpu())
         if self._do_collect('w_grad'):
-            self._insert_module_data(module.name, 'w_grad', grad_w.cpu())
+            self._insert_module_data(module.name, 'w_grad', grad_weight.cpu())
         if self._do_collect('b_grad'):
-            self._insert_module_data(module.name, 'b_grad', grad_b.cpu())
+            self._insert_module_data(module.name, 'b_grad', grad_bias.cpu())
+
         self._complete_module_backward(module.name)
 
     def register_forward(self):
         self.hook_manager.register_forward_hook(self.forward_hook,
                                                 hook_fn_name='ModuleTracker.forward_hook',
                                                 activate=False, **self.modules)
-        self.hook_manager.register_forward_pre_hook(self.forward_pre_hook,
-                                                    hook_fn_name='ModuleTracker.forward_pre_hook',
-                                                    activate=False, **self.modules)
 
     def register_backward(self):
         self.hook_manager.register_backward_hook(self.backward_hook,
@@ -407,9 +407,10 @@ class ModuleTracker:
                                                  activate=False, **self.modules)
 
     def register_all(self):
-        if any([self._do_collect(var) for var in GRAPH_VARS]):
+        if self.protocol.track_forward:
             self.register_forward()
-        self.register_backward()
+        if self.protocol.track_backward:
+            self.register_backward()
 
     @validate_vars(keyword='vars_')
     def clear_data_buffer_module(self, *module_names: str, vars_: List[str] = None):

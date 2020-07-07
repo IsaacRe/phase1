@@ -162,6 +162,7 @@ class HookManager:
     Class for centralized handling of PyTorch module hooks
     """
 
+    # TODO modify cache clearing to allow for recursive caching of module vars
     def __init__(self, wrap_calls=True, recursion_depth=0, retain_forward_cache=False):
         # Lookup tables
         self.hook_fns = set()
@@ -182,12 +183,13 @@ class HookManager:
                                                          name='HookManager._forward_pre_hook_base')
             self.add_hook_fn(self.base_forward_hook_fn, self.base_forward_pre_hook_fn)
 
+        self.retain_forward_cache = retain_forward_cache  # whether to retain cached forward vars through backward pass
         # levels of child-modules at which hooks will be recursively set
-        self.retain_forward_cache = retain_forward_cache
         self.max_recursion_depth = recursion_depth
+        self.num_module_inputs = {}
+        self.valid_module_params = {}  # caches valid (not None) params whose gradients will be cached during backward
         self.input_cache = {}
         self.output_cache = {}
-        self.valid_module_params = {}  # caches valid (not None) params whose gradients will be cached during backward
         self.param_grad_cache = {}
         self.input_grad_cache = {}  # caches intermediate gradient tensors of module inputs
         self.output_grad_cache = {}  # caches intermediate gradient tensors of module outputs
@@ -196,9 +198,10 @@ class HookManager:
         self._cleanup()
 
     def _cleanup(self):
+        self.num_module_inputs = {}
+        self.valid_module_params = {}
         self.input_cache = {}
         self.output_cache = {}
-        self.valid_module_params = {}
         self.param_grad_cache = {}
         self.input_grad_cache = {}
         self.output_grad_cache = {}
@@ -213,19 +216,23 @@ class HookManager:
         self.name_to_module = {}
         self.function_to_hookfn = {}
 
-    def _init_module_cache(self, *modules):
-        for module in modules:
-            self.input_cache[module.name] = []
-            self.output_cache[module.name] = None
-            self.valid_module_params[module.name] = []
-            self.param_grad_cache[module.name] = {}
-            self.input_grad_cache[module.name] = []
-            self.output_grad_cache[module.name] = None
-
     def _clear_forward_module_cache(self, *modules):
         for module in modules:
             self.input_cache[module.name] = []
             self.output_cache[module.name] = None
+
+    def _clear_backward_module_cache(self, *modules):
+        for module in modules:
+            self.param_grad_cache[module.name] = {}
+            self.input_grad_cache[module.name] = []
+            self.output_grad_cache[module.name] = None
+
+    def _init_module_cache(self, *modules):
+        self._clear_forward_module_cache(*modules)
+        self._clear_backward_module_cache(*modules)
+        for module in modules:
+            self.num_module_inputs[module.name] = -1
+            self.valid_module_params[module.name] = []
 
     def _register_base_hooks(self, *modules, activate=False):
         assert self.wrap_calls, 'base hooks should only be registered when wrap_calls is set'
@@ -323,7 +330,7 @@ class HookManager:
         return grad_in
 
     def _have_all_gradients(self, module):
-        have_input_grads = len(self.input_grad_cache[module.name]) == len(self.input_cache[module.name])
+        have_input_grads = len(self.input_grad_cache[module.name]) == self.num_module_inputs[module.name]
         have_param_grads = all([param in self.param_grad_cache[module.name] for param in
                                 self.valid_module_params[module.name]])
         return have_input_grads and have_param_grads
@@ -336,6 +343,7 @@ class HookManager:
             # if all input gradients have been accumulated, initiate module backward hooks
             if self._have_all_gradients(module):
                 self._execute_backward_hooks(module)
+                self._init_module_cache(module)
 
         return backward_hook
 
@@ -344,8 +352,10 @@ class HookManager:
         def backward_hook(grad):
             self.param_grad_cache[module.name][param_name] = grad
 
+            # if all input gradients have been accumulated, initiate module backward hooks
             if self._have_all_gradients(module):
                 self._execute_backward_hooks(module)
+                self._init_module_cache(module)
 
         return backward_hook
 
@@ -358,20 +368,25 @@ class HookManager:
 
     def _forward_pre_hook_base(self, module, inputs):
         self.input_cache[module.name] = inputs
+        self.num_module_inputs[module.name] = len(inputs)
         for inp in inputs:
             if not inp.requires_grad:
                 inp.requires_grad = True
             inp.register_hook(self._make_backward_hook_input(module))
         return self._execute_forward_pre_hooks(module, inputs)
 
-    def _forward_hook_base(self, module, inputs, output):
+    def _forward_hook_base(self, module, input, output):
         self.output_cache[module.name] = output
         output.register_hook(self._make_backward_hook_output(module))
         for name, param in module._parameters.items():
             if param is not None:
                 self.valid_module_params[module.name] += [name]
                 param.register_hook(self._make_backward_hook_param(module, name))
-        return self._execute_forward_hooks(module)
+        new_output = self._execute_forward_hooks(module)
+        if not self.retain_forward_cache:
+            self._clear_forward_module_cache(module)
+
+        return new_output
 
     def add_hook_fn(self, *hook_fns):
         for hook_fn in hook_fns:
