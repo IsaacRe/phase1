@@ -173,7 +173,7 @@ class Protocol:
         for protocol, value in overwrite_protocol.items():
             assert protocol in self.proto_dict, "cannot overwrite protocol '%s'. '%s' is not contained" \
                                                 " in proto_dict." % (protocol, protocol)
-            self.proto_ditc[protocol] = value
+            self.proto_dict[protocol] = value
 
     def _add_from_json(self, json_file):
         protocol_dict = json.load(open(json_file, 'r'))

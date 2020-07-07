@@ -63,7 +63,7 @@ class PruneProtocol(Protocol):
         self._add_protocol(prune_by=prune_by, **overwrite_protocol)
 
     def _set_default_method_protocol(self, prune_method):
-        for protocol, value in DEFAULT_PRUNE_METHOD_PROTOCOLS[prune_method]:
+        for protocol, value in DEFAULT_PRUNE_METHOD_PROTOCOLS[prune_method].items():
             self.proto_dict[protocol] = value
 
 
@@ -128,8 +128,10 @@ class ModulePruner:
 
     def _make_tracker(self):
         prune_by = self.protocol.prune_by
-        if prune_by in ['weight', 'weight_gradient']:
+        if prune_by == 'weight':
             vars_ = []
+        elif prune_by == 'weight_gradient':
+            vars_ = ['w_grad']
         elif prune_by == 'output':
             vars_ = ['out']
         elif prune_by == 'output_gradient':
@@ -187,7 +189,7 @@ class ModulePruner:
         self._mask_by_method_lookup[prune_by](**prune_kwargs)
         self.masks_initialized = True
 
-    def forward_hook(self, module, inp, out):
+    def forward_hook(self, module, input, output):
         """
         Forward hook to conduct pruning of module output after that module's forward pass
         :param module: Module object whose output is being pruned
@@ -196,23 +198,25 @@ class ModulePruner:
         :return: Tensor of pruned input
         """
         output_prune_mask = self.prune_masks[module.name]
-        assert tuple(output_prune_mask.shape) == tuple(out.shape), \
-            "dimensionality of output and prune mask for Module '%s' are not the same." \
-            " (%s != %s)" % (module.name, tuple(output_prune_mask.shape), tuple(out.shape))
-        out[output_prune_mask] = 0.0
-        return out
+        if not isinstance(output_prune_mask, slice):
+            assert tuple(output_prune_mask.shape) == tuple(output.shape), \
+                "dimensionality of output and prune mask for Module '%s' are not the same." \
+                " (%s != %s)" % (module.name, tuple(output_prune_mask.shape), tuple(output.shape))
+        output[output_prune_mask] = 0.0
+        return output
 
-    def forward_pre_hook(self, module, inp):
+    def forward_pre_hook(self, module, input):
         """
-        Forward pre-hook to enforce zeroing of all pruned connections in a module's weight
+        Forward pre-hook to conduct pruning of module weight before that module's forward pass
         parameter before each forward pass of that module is conducted
         :param module: Module object whose weights are being pruned
         :param inp: Tensor of input to module
         """
         weight_prune_mask = self.prune_masks[module.name]
-        assert tuple(weight_prune_mask.shape) == tuple(module.weight.shape), \
-            "dimensionality of output and prune mask for Module '%s' are not the same." \
-            " (%s != %s)" % (module.name, tuple(weight_prune_mask.shape), tuple(module.weight.shape))
+        if not isinstance(weight_prune_mask, slice):
+            assert tuple(weight_prune_mask.shape) == tuple(module.weight.shape), \
+                "dimensionality of output and prune mask for Module '%s' are not the same." \
+                " (%s != %s)" % (module.name, tuple(weight_prune_mask.shape), tuple(module.weight.shape))
         module.weight.data[weight_prune_mask] = 0.0
 
     def register_hooks(self):
@@ -221,14 +225,16 @@ class ModulePruner:
         if 'weight' in prune_by:
             self.hook_manager.register_forward_pre_hook(self.forward_pre_hook,
                                                         hook_fn_name='ModulePruner.forward_pre_hook',
+                                                        activate=False,
                                                         **self.modules)
         # if conducting output-pruning, register forward_hook
         else:
             self.hook_manager.register_forward_pre_hook(self.forward_hook,
                                                         hook_fn_name='ModulePruner.forward_hook',
+                                                        activate=False,
                                                         **self.modules)
 
-    def clear_prune_masks_all(self):
+    def clear_prune_masks(self):
         self.prune_masks = {module_name: None for module_name in self.module_names}
         self.masks_initialized = False
 
@@ -238,6 +244,7 @@ class ModulePruner:
         if recompute_masks or not self.masks_initialized:
             enter_fns += [lambda: self._set_prune_masks(**self.protocol)]
         if clear_on_exit:
-            exit_fns += [self.clear_prune_masks_all]
-        return self.hook_manager.hook_all_context(add_enter_fns=enter_fns,
+            exit_fns += [self.clear_prune_masks]
+        return self.hook_manager.hook_all_context(hook_types=[self.forward_hook, self.forward_pre_hook],
+                                                  add_enter_fns=enter_fns,
                                                   add_exit_fns=exit_fns)

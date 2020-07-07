@@ -301,7 +301,8 @@ class ModuleTracker:
         exit_fns = [self._cleanup_tracking]
         if clear_on_exit:
             exit_fns += [self.clear_data_buffer_all]
-        return self.hook_manager.hook_all_context(add_exit_fns=exit_fns)
+        return self.hook_manager.hook_all_context(hook_types=[self.forward_hook, self.backward_hook],
+                                                  add_exit_fns=exit_fns)
 
     def aggregate_vars(self, dataloader: DataLoader, network: Module = None, device: int = 0):
         if network is None:
