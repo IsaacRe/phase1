@@ -98,8 +98,8 @@ class HookManagerTestCase(unittest.TestCase):
         data_pass(self.dataloader, self.network, backward_fn=CrossEntropyLoss(), early_stop=1)
 
         self.assertEqual(self.f_set, 'conv1')
-        self.assertEqual(self.b_set, 'conv1')
         self.assertEqual(self.f_pre_set, 'conv1')
+        self.assertEqual(self.b_set, 'conv1')
 
     def test_deactivate_hooks(self):
         module = get_module(self.network, 'conv1')
