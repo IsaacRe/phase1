@@ -293,6 +293,7 @@ class ModuleTracker:
         return {module_name: torch.cat(self.data_buffer[module_name][var_name], dim=0)
                 for module_name in self.data_buffer}
 
+    # TODO export var data hashed by corresponding protocol suffix
     def gather_data(self):
         return {module_name: self.gather_module_data(module_name) for module_name in self.data_buffer}
 
