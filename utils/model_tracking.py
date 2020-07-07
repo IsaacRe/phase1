@@ -322,29 +322,6 @@ class ModuleTracker:
     #TODO
     #def aggregate_vars(self, dataloader: DataLoader, ):
 
-    ################################################################################
-
-    def _make_input_backward_hook(self, module):
-        def backward_hook(grad):
-            print('\n\n\n\n\nIn input hook for module %s' % module.name)
-
-        return backward_hook
-
-    def _make_output_backward_hook(self, module):
-        def backward_hook(grad):
-            print('\n\n\n\n\nIn output hook for module %s' % module.name)
-
-        return backward_hook
-
-    def forward_pre_hook(self, module, inp):
-        (inp,) = inp
-        # set require_grad to True for the network input
-        if not inp.requires_grad:
-            inp.requires_grad = True
-        #inp.register_hook(self._make_input_backward_hook(module))
-
-    ################################################################################
-
     # TODO modify to allow tracking for modules with multiple inputs
     def forward_hook(self, module, input, output):
         (inp,) = input
@@ -358,31 +335,9 @@ class ModuleTracker:
         if self._do_collect('b'):
             self._insert_module_data(module.name, 'b', self.collect_bias(module.name))
 
-        # setup backward hook for collection of module's output gradient
-        #out.register_hook(self._make_output_backward_hook(module))
-
         self._complete_module_forward(module.name)
 
     def backward_hook(self, module, grad_in, grad_weight, grad_bias, grad_out):
-        if False:
-            print('\n\n\n\n\n\n\n\n')
-            print(module.name)
-            print(len(grad_in), len(grad_out))
-            print('IN')
-            for i in range(len(grad_in)):
-                if grad_in[i] is None:
-                    print('NONE')
-                else:
-                    print(grad_in[i].shape)
-            print('OUT')
-            for i in range(len(grad_out)):
-                if grad_out[i] is None:
-                    print('NONE')
-                else:
-                    print(grad_out[i].shape)
-
-        if len(grad_in) == 0:
-            print(module.name)
         (grad_in,) = grad_in
 
         if self._do_collect('inp_grad'):
