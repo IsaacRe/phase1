@@ -81,18 +81,6 @@ def validate_vars(var_idx=0, multiple=False, keyword=None, valid_vars=ALL_VARS):
     return wrapper_fn
 
 
-"""
-def validate_vars(fn):
-    def new_fn(*vars, **kwargs):
-        for var in vars:
-            assert var in ALL_VARS, 'Invalid var, %s, passed to tracker.' \
-                                      ' Use a valid var key: %s' % (var, ', '.join(ALL_VARS))
-        return fn(*vars, **kwargs)
-
-    return new_fn
-"""
-
-
 class TrackingProtocol(Protocol):
 
     DEFAULT_PROTOCOL = DEFAULT_TRACKING_PROTOCOL
@@ -222,9 +210,6 @@ class ModuleTracker:
         assert grad is not None, "gradient is None for module '%s'. Make sure you are calling collect" \
                                  "before zero_grad." % module_name
         return grad.cpu()
-
-    #TODO
-    #def aggregate_vars(self, dataloader: DataLoader, ):
 
     # TODO modify to allow tracking for modules with multiple inputs
     def forward_hook(self, module, input, output):

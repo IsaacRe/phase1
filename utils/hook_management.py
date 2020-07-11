@@ -4,27 +4,6 @@ from torch import Tensor
 from torch.nn import Module
 
 
-# TODO can this be made to work in general?
-sample_layer42_backward_hook_kwargs = {
-    'grad_in': Tensor,
-    'grad_out': Tensor,
-    'weight': Tensor,
-    'bias': Tensor,
-    'conv1': {
-        'grad_in': Tensor,
-        'grad_out': Tensor,
-        'weight': Tensor,
-        'bias': Tensor,
-    },
-    'conv2': {
-        'grad_in': Tensor,
-        'grad_out': Tensor,
-        'weight': Tensor,
-        'bias': Tensor,
-    }
-}
-
-
 def increment_name(name):
     """
     Increments the number appended to the name and returns the resulting string
