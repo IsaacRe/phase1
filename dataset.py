@@ -1,7 +1,7 @@
 import os.path as path
 from torch.utils.data.dataset import Dataset
 from torchvision.datasets import CIFAR100  #, ImageNet
-from torchvision.transforms import Resize
+from torchvision.transforms import Resize, Compose, RandomCrop, RandomHorizontalFlip
 from torchvision.transforms.functional import to_tensor
 from torch.utils.data import DataLoader
 import torch
@@ -32,8 +32,9 @@ def extend_dataset(base_dataset):
 
     class ExtendedDataset(DATASETS[base_dataset]):
 
-        def __init__(self, *args, num_classes=100, keep_index=True, img_size=224, **kwargs):
-            super(ExtendedDataset, self).__init__(*args, **kwargs)
+        def __init__(self, *args, num_classes=100, keep_index=True, img_size=224, train=True, **kwargs):
+            super(ExtendedDataset, self).__init__(*args, train=train, **kwargs)
+            self.train = train
             self.num_classes = num_classes
             self.data_index = None
             self.keep_index = keep_index
@@ -41,20 +42,22 @@ def extend_dataset(base_dataset):
                 self.data_index = np.arange(len(self))
             self.mean_image = None
             self.resize = Resize(img_size)
+            self.augment = Compose([RandomCrop(img_size, padding=8), RandomHorizontalFlip()])
             self._set_mean_image()
             self._set_data()
 
         def __getitem__(self, index):
             x_arr, y = self.data[index], self.targets[index]
 
-            # center data
-            x_arr -= self.mean_image
-
             # convert to PIL Image
             img = Image.fromarray(x_arr)
 
             # resize image
             img = self.resize(img)
+
+            # apply data augmentation
+            if self.train:
+                img = self.augment(img)
 
             # convert to tensor
             x = to_tensor(img)
@@ -72,6 +75,7 @@ def extend_dataset(base_dataset):
                 mean_image = np.mean(self.data, axis=0)
                 np.save(mean_image_path, mean_image)
             self.mean_image = mean_image.astype(np.uint8)
+            self.data -= self.mean_image[None]
 
         def _get_data_mask(self, label_arr):
             mask = label_arr == 0
