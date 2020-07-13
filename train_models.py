@@ -28,8 +28,6 @@ parser.add_argument('--num-classes', type=int, default=100, help='number of clas
 
 args = parser.parse_args()
 
-torch.manual_seed(args.seed)
-
 
 def save_model(model_path):
     torch.save(model.state_dict(), model_path)
@@ -56,6 +54,7 @@ def train(epochs, device=0):
     optim = torch.optim.Adam(model.parameters(), lr=args.lr)
     loss_fn = torch.nn.CrossEntropyLoss()
     total, correct = [], []
+    torch.manual_seed(args.seed)  # seed dataloader shuffling
     for e in range(epochs):
         print('Beginning epoch %d/%d' % (e + 1, epochs))
         losses = []
@@ -78,6 +77,7 @@ def train(epochs, device=0):
 
 
 # load network
+torch.manual_seed(args.seed)  # seed random network initialization
 model = resnet34(pretrained=args.pretrained)
 model.fc = torch.nn.Linear(model.fc.in_features, args.num_classes, bias=True)
 model.cuda()
