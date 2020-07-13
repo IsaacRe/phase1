@@ -2,7 +2,7 @@ import numpy as np
 from torch.nn import Module
 from torch.utils.data import DataLoader
 from utils.hook_management import HookManager
-from utils.helpers import Protocol
+from utils.helpers import Protocol, get_named_modules_from_network
 from utils.model_tracking import ModuleTracker, TrackingProtocol
 
 
@@ -80,6 +80,11 @@ class ModulePruner:
                  network: Module = None,
                  loss_fn=None,
                  **named_modules: Module):
+        # if no modules specified, prune all modules in network
+        if len(modules) == 0 and len(named_modules) == 0:
+            assert network is not None, 'no modules or network object passed to ModulePruner'
+            named_modules = get_named_modules_from_network(network)
+
         self.protocol = prune_protocol
         self.prune_masks_filepath = prune_masks_filepath
         self.load_prune_masks = load_prune_masks

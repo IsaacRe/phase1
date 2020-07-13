@@ -39,6 +39,12 @@ class ModulePrunerTestCase(unittest.TestCase):
         pruner._mask_by_weight_gradient()
         pruner._mask_by_weight_gradient(fix_prune_ratio=False)
 
+    def test_prune_all_modules(self):
+        protocol = PruneProtocol()
+        pruner = ModulePruner(protocol, hook_manager=self.hook_manager, network=self.network,
+                              dataloader=self.dataloader, loss_fn=torch.nn.CrossEntropyLoss())
+        pruner._mask_by_weight()
+
     def set_prune_all_weights(self, pruner):
         for name, module in self.modules.items():
             pruner.prune_masks[name] = slice(None)
