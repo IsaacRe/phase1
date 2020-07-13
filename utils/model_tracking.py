@@ -86,7 +86,8 @@ class TrackingProtocol(Protocol):
     DEFAULT_PROTOCOL = DEFAULT_TRACKING_PROTOCOL
 
     @validate_vars(var_idx=1, multiple=True)
-    def __init__(self, *vars_, record_every=None, buffer_len=None, protocol_json=None, **overwrite_protocol):
+    def __init__(self, *vars_, record_every=None, buffer_len=None, protocol_json=None, namespace=None,
+                 **overwrite_protocol):
         super(TrackingProtocol, self).__init__()
         # track only the vars specified
         for var in ALL_VARS:
@@ -106,6 +107,8 @@ class TrackingProtocol(Protocol):
         # allow protocol to be loaded from a specified file
         if protocol_json:
             self._add_from_json(protocol_json)
+        if namespace:
+            self._add_from_namespace(namespace)
         # allow specification of specific vars
         self._add_protocol(**overwrite_protocol)
         # set hook requirements

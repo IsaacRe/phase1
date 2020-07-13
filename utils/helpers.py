@@ -180,6 +180,11 @@ class Protocol:
         for protocol, value in protocol_dict.items():
             self.proto_dict[protocol] = value
 
+    def _add_from_namespace(self, namespace):
+        for protocol, value in namespace.__dict__.items():
+            if protocol in self.proto_dict:
+                self.proto_dict[protocol] = value
+
     def keys(self):
         return self.proto_dict.keys()
 

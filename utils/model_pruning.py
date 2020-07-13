@@ -13,20 +13,23 @@ DEFAULT_PRUNE_PROTOCOL = {
     'fix_prune_ratio': True,
     'prune_ratio': 0.95,
     'prune_across_modules': False,
+    'load_prune_masks': False,
+    'save_prune_masks': False,
+    'prune_masks_filepath': '',
 }
 
 DEFAULT_PRUNE_METHOD_PROTOCOLS = {
     'weight': {
-        'weight_threshold': 0.1
+        'prune_threshold': 0.1
     },
     'weight_gradient': {
-        'grad_threshold': 0.05
+        'prune_threshold': 0.05
     },
     'output': {
-        'output_threshold': 0.4
+        'prune_threshold': 0.4
     },
     'output_gradient': {
-        'grad_threshold': 0.2
+        'prune_threshold': 0.2
     }
 }
 
@@ -55,11 +58,13 @@ class PruneProtocol(Protocol):
     DEFAULT_PROTOCOL = DEFAULT_PRUNE_PROTOCOL
 
     @validate_prune_method(keyword='prune_by')
-    def __init__(self, prune_by='weight', protocol_json=None, **overwrite_protocol):
+    def __init__(self, prune_by='weight', protocol_json=None, namespace=None, **overwrite_protocol):
         super(PruneProtocol, self).__init__()
         self._set_default_method_protocol(prune_by)
         if protocol_json:
             self._add_from_json(protocol_json)
+        if namespace:
+            self._add_from_namespace(namespace)
         self._add_protocol(prune_by=prune_by, **overwrite_protocol)
 
     def _set_default_method_protocol(self, prune_method):
@@ -72,9 +77,6 @@ class ModulePruner:
     def __init__(self, prune_protocol, *modules: Module,
                  hook_manager: HookManager = None,
                  tracker: ModuleTracker = None,
-                 load_prune_masks: bool = False,
-                 save_prune_masks: bool = False,
-                 prune_masks_filepath: str = '',
                  dataloader: DataLoader = None,
                  device=0,
                  network: Module = None,
@@ -86,9 +88,6 @@ class ModulePruner:
             named_modules = get_named_modules_from_network(network)
 
         self.protocol = prune_protocol
-        self.prune_masks_filepath = prune_masks_filepath
-        self.load_prune_masks = load_prune_masks
-        self.save_prune_masks = save_prune_masks
 
         # setup modules
         self.modules = named_modules
@@ -148,22 +147,22 @@ class ModulePruner:
                         prune_across_modules=False,
                         fix_prune_ratio=True,
                         prune_ratio=0.95,
-                        weight_threshold=0.5):
+                        prune_threshold=0.5):
         if prune_across_modules:
             raise NotImplementedError()
         else:
             for name, module in self.modules.items():
                 weight = self.tracker.collect_weight(name).abs()
                 if fix_prune_ratio:
-                    weight_threshold = np.percentile(weight, prune_ratio)
-                mask = weight < weight_threshold
+                    prune_threshold = np.percentile(weight, prune_ratio)
+                mask = weight < prune_threshold
                 self.prune_masks[name] = mask
 
     def _mask_by_weight_gradient(self,
                                  prune_across_modules=False,
                                  fix_prune_ratio=True,
                                  prune_ratio=0.95,
-                                 grad_threshold=0.1):
+                                 prune_threshold=0.1):
         # accumulate gradient of weights
         w_grads = self.tracker.aggregate_vars(self.dataloader, network=self.network, device=self.device)
         if prune_across_modules:
@@ -172,22 +171,22 @@ class ModulePruner:
             for name, module in self.modules.items():
                 mean_w_grad = w_grads[name]['w_grad'].mean(dim=0).abs()
                 if fix_prune_ratio:
-                    grad_threshold = np.percentile(mean_w_grad, prune_ratio)
-                mask = mean_w_grad < grad_threshold
+                    prune_threshold = np.percentile(mean_w_grad, prune_ratio)
+                mask = mean_w_grad < prune_threshold
                 self.prune_masks[name] = mask
 
     def _mask_by_output(self,
                         prune_across_modules=False,
                         fix_prune_ratio=True,
                         prune_ratio=0.95,
-                        output_threshold=0.5):
+                        prune_threshold=0.5):
         raise NotImplementedError()
 
     def _mask_by_output_gradient(self,
                                  prune_across_modules=False,
                                  fix_prune_ratio=True,
                                  prune_ratio=0.95,
-                                 grad_threshold=0.5):
+                                 prune_threshold=0.5):
         raise NotImplementedError()
 
     def _set_prune_masks(self, prune_by='weight_magnitude', **prune_kwargs):
