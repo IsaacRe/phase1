@@ -16,7 +16,7 @@ parser.add_argument('--final-model-path', type=str, help='path to save file of t
 parser.add_argument('--pretrained', action='store_true', help='start from pretrained initialization')
 parser.add_argument('--data-dir', type=str, default='../../data', help='path to data directory')
 parser.add_argument('--save-acc', action='store_true', help='save per class accuracies of the model after each epoch')
-parser.add_argument('--acc-save-path', type=str, default='models/accuracies.npy')
+parser.add_argument('--acc-save-path', type=str, default='models/accuracies.npz')
 
 # Training args
 parser.add_argument('--dataset', type=str, default='CIFAR', help='the dataset to train on')
@@ -47,7 +47,7 @@ def test(device=0):
         total += y.sum(axis=0)
         correct += np.logical_and(pred, y).sum(axis=0)
 
-    print('%d/%d (%.2f)' % (correct.sum(), total.sum(), correct.sum() / total.sum()))
+    print('%d/%d (%.2f%%)' % (correct.sum(), total.sum(), correct.sum() / total.sum() * 100.))
     return correct, total
 
 
@@ -79,6 +79,7 @@ def train(epochs, device=0):
 
 # load network
 model = resnet34(pretrained=args.pretrained)
+model.fc = torch.nn.Linear(model.fc.in_features, args.num_classes, bias=True)
 model.cuda()
 save_model(args.init_model_path)
 
