@@ -252,3 +252,17 @@ class ModulePruner:
         return self.hook_manager.hook_all_context(hook_types=[self.forward_hook, self.forward_pre_hook],
                                                   add_enter_fns=enter_fns,
                                                   add_exit_fns=exit_fns)
+
+    def get_prune_masks(self):
+        return {module_name: self.prune_masks[module_name] for module_name in self.module_names}
+
+    def set_prune_masks(self, **module_masks):
+        for module_name, prune_mask in module_masks.items():
+            self.prune_masks[module_name] = prune_mask
+
+    def compute_prune_masks(self, reset=False):
+        self._set_prune_masks(**self.protocol)
+        mask_dict = self.get_prune_masks()
+        if reset:
+            self.clear_prune_masks()
+        return mask_dict
