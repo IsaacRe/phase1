@@ -50,7 +50,6 @@ def train(args: TrainingArgs, model, train_loader, test_loader, device=0):
             optim.step()
             optim.zero_grad()
             losses += [loss.item()]
-            break
         print('Mean loss for epoch %d: %.4f' % (e, sum(losses) / len(losses)))
         print('Test accuracy for epoch %d:' % e, end=' ')
         correct_, total_ = test(model, test_loader, device=device)
