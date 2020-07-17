@@ -110,7 +110,7 @@ class TrackingProtocol(Protocol):
         if namespace:
             self._add_from_namespace(namespace)
         # allow specification of specific vars
-        self._add_protocol(**overwrite_protocol)
+        self.overwrite_protocol(**overwrite_protocol)
         # set hook requirements
         self['track_forward'], self['track_backward'] = False, False
         self._set_forward_backward()

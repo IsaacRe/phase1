@@ -15,20 +15,23 @@ DEFAULT_PRUNE_PROTOCOL = {
     'prune_across_modules': False,
     'load_prune_masks': False,
     'save_prune_masks': False,
-    'prune_masks_filepath': '',
 }
 
 DEFAULT_PRUNE_METHOD_PROTOCOLS = {
     'weight': {
+        'prune_masks_filepath': 'prune-masks/prune-by-weight.npz',
         'prune_threshold': 0.1
     },
     'weight_gradient': {
+        'prune_masks_filepath': 'prune-masks/prune-by-weight-grad.npz',
         'prune_threshold': 0.05
     },
     'output': {
+        'prune_masks_filepath': 'prune-masks/prune-by-output.npz',
         'prune_threshold': 0.4
     },
     'output_gradient': {
+        'prune_masks_filepath': 'prune-masks/prune-by-output-grad.npz',
         'prune_threshold': 0.2
     }
 }
@@ -65,7 +68,7 @@ class PruneProtocol(Protocol):
             self._add_from_json(protocol_json)
         if namespace:
             self._add_from_namespace(namespace)
-        self._add_protocol(prune_by=prune_by, **overwrite_protocol)
+        self.overwrite_protocol(prune_by=prune_by, **overwrite_protocol)
 
     def _set_default_method_protocol(self, prune_method):
         for protocol, value in DEFAULT_PRUNE_METHOD_PROTOCOLS[prune_method].items():
@@ -143,6 +146,12 @@ class ModulePruner:
         return ModuleTracker(TrackingProtocol(*vars_),
                              hook_manager=self.hook_manager, **self.modules)
 
+    def _load_prune_masks(self, load_file):
+        raise NotImplementedError()
+
+    def _save_prune_masks(self, save_file):
+        raise NotImplementedError()
+
     def _mask_by_weight(self,
                         prune_across_modules=False,
                         fix_prune_ratio=True,
@@ -154,7 +163,7 @@ class ModulePruner:
             for name, module in self.modules.items():
                 weight = self.tracker.collect_weight(name).abs()
                 if fix_prune_ratio:
-                    prune_threshold = np.percentile(weight, prune_ratio)
+                    prune_threshold = np.percentile(weight, prune_ratio * 100.)
                 mask = weight < prune_threshold
                 self.prune_masks[name] = mask
 
@@ -171,7 +180,7 @@ class ModulePruner:
             for name, module in self.modules.items():
                 mean_w_grad = w_grads[name]['w_grad'].mean(dim=0).abs()
                 if fix_prune_ratio:
-                    prune_threshold = np.percentile(mean_w_grad, prune_ratio)
+                    prune_threshold = np.percentile(mean_w_grad, prune_ratio * 100.)
                 mask = mean_w_grad < prune_threshold
                 self.prune_masks[name] = mask
 
@@ -189,8 +198,17 @@ class ModulePruner:
                                  prune_threshold=0.5):
         raise NotImplementedError()
 
-    def _set_prune_masks(self, prune_by='weight_magnitude', **prune_kwargs):
-        self._mask_by_method_lookup[prune_by](**prune_kwargs)
+    def _set_prune_masks(self, prune_by='weight_magnitude',
+                         load_prune_masks=False,
+                         save_prune_masks=False,
+                         prune_masks_filepath=None,
+                         **prune_kwargs):
+        if load_prune_masks:
+            self._load_prune_masks(prune_masks_filepath)
+        else:
+            self._mask_by_method_lookup[prune_by](**prune_kwargs)
+        if save_prune_masks:
+            self._save_prune_masks(prune_masks_filepath)
         self.masks_initialized = True
 
     def forward_hook(self, module, input, output):
@@ -237,6 +255,9 @@ class ModulePruner:
                                                         hook_fn_name='ModulePruner.forward_hook',
                                                         activate=False,
                                                         **self.modules)
+
+    def set_protocol(self, **overwrite_protocol):
+        self.protocol.overwrite_protocol(**overwrite_protocol)
 
     def clear_prune_masks(self):
         self.prune_masks = {module_name: None for module_name in self.module_names}

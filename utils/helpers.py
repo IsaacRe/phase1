@@ -169,12 +169,6 @@ class Protocol:
             raise TypeError("cannot create object of abstract class 'Protocol'")
         self.__dict__['proto_dict'] = dict(self.DEFAULT_PROTOCOL)
 
-    def _add_protocol(self, **overwrite_protocol):
-        for protocol, value in overwrite_protocol.items():
-            assert protocol in self.proto_dict, "cannot overwrite protocol '%s'. '%s' is not contained" \
-                                                " in proto_dict." % (protocol, protocol)
-            self.proto_dict[protocol] = value
-
     def _add_from_json(self, json_file):
         protocol_dict = json.load(open(json_file, 'r'))
         for protocol, value in protocol_dict.items():
@@ -184,6 +178,12 @@ class Protocol:
         for protocol, value in namespace.__dict__.items():
             if protocol in self.proto_dict:
                 self.proto_dict[protocol] = value
+
+    def overwrite_protocol(self, **overwrite_protocol):
+        for protocol, value in overwrite_protocol.items():
+            assert protocol in self.proto_dict, "cannot overwrite protocol '%s'. '%s' is not contained" \
+                                                " in proto_dict." % (protocol, protocol)
+            self.proto_dict[protocol] = value
 
     def keys(self):
         return self.proto_dict.keys()
