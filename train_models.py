@@ -16,21 +16,22 @@ def save_model(model, save_path, device=0):
 
 
 def test(model, loader, device=0):
-    model.eval()
-    num_classes = model.fc.out_features
-    total, correct = np.zeros(num_classes), np.zeros(model.fc.out_features)
-    class_idxs = np.arange(num_classes)[None].repeat(loader.batch_size, axis=0)
-    for i, x, y in tqdm(loader):
-        x, y = x.to(device), y.to(device)
-        out = model(x)
-        pred = out.argmax(dim=1)
-        # TODO debug
-        y, pred = (y.cpu().numpy()[:, None] == class_idxs), (pred.cpu().numpy()[:, None] == class_idxs)
-        total += y.sum(axis=0)
-        correct += np.logical_and(pred, y).sum(axis=0)
+    with torch.no_grad():
+        model.eval()
+        num_classes = model.fc.out_features
+        total, correct = np.zeros(num_classes), np.zeros(model.fc.out_features)
+        class_idxs = np.arange(num_classes)[None].repeat(loader.batch_size, axis=0)
+        for i, x, y in tqdm(loader):
+            x, y = x.to(device), y.to(device)
+            out = model(x)
+            pred = out.argmax(dim=1)
+            # TODO debug
+            y, pred = (y.cpu().numpy()[:, None] == class_idxs), (pred.cpu().numpy()[:, None] == class_idxs)
+            total += y.sum(axis=0)
+            correct += np.logical_and(pred, y).sum(axis=0)
 
-    print('%d/%d (%.2f%%)' % (correct.sum(), total.sum(), correct.sum() / total.sum() * 100.))
-    return correct, total
+        print('%d/%d (%.2f%%)' % (correct.sum(), total.sum(), correct.sum() / total.sum() * 100.))
+        return correct, total
 
 
 def train(args: TrainingArgs, model, train_loader, test_loader, device=0):
