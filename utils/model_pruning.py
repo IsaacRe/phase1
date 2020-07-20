@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 from torch.nn import Module
 from torch.utils.data import DataLoader
 from utils.hook_management import HookManager
@@ -158,11 +159,36 @@ class ModulePruner:
                         prune_ratio=0.95,
                         prune_threshold=0.5):
         if prune_across_modules:
-            raise NotImplementedError()
+
+            max_prune, min_prune = 0, 1
+            max_prune_name, min_prune_name = None, None
+
+            if fix_prune_ratio:
+                # gather all weights into single tensor
+                all_weights = []
+                for name in self.modules:
+                    all_weights += [self.tracker.collect_weight(name).cpu().flatten()]
+                all_weights = torch.cat(all_weights).abs().numpy()
+                # compute single prune_threshold for all modules
+                prune_threshold = np.percentile(all_weights, prune_ratio * 100.)
+            for name, module in self.modules.items():
+                weight = self.tracker.collect_weight(name).abs()
+                mask = weight < prune_threshold
+
+                amt_pruned = len(np.where(mask)[0]) / mask.flatten().shape[0]
+                if amt_pruned < min_prune:
+                    min_prune = amt_pruned
+                    min_prune_name = name
+                if amt_pruned > max_prune:
+                    max_prune = amt_pruned
+                    max_prune_name = name
+
+                self.prune_masks[name] = mask
         else:
             for name, module in self.modules.items():
                 weight = self.tracker.collect_weight(name).abs()
                 if fix_prune_ratio:
+                    # compute prune threshold for the current module
                     prune_threshold = np.percentile(weight, prune_ratio * 100.)
                 mask = weight < prune_threshold
                 self.prune_masks[name] = mask
