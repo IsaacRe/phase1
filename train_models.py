@@ -31,18 +31,33 @@ def test(model, loader, device=0):
             correct += np.logical_and(pred, y).sum(axis=0)
 
         print('%d/%d (%.2f%%)' % (correct.sum(), total.sum(), correct.sum() / total.sum() * 100.))
+        model.train()
         return correct, total
 
 
 def train(args: TrainingArgs, model, train_loader, test_loader, device=0):
     model.train()
-    optim = torch.optim.Adam(model.parameters(), lr=args.lr)
+    def get_optim(lr):
+        return torch.optim.SGD(model.parameters(),
+                               lr=lr,
+                               nesterov=args.nesterov,
+                               momentum=args.momentum,
+                               weight_decay=args.weight_decay)
+    lr = args.lr
+    optim = get_optim(lr)
     loss_fn = torch.nn.CrossEntropyLoss()
     total, correct = [], []
     torch.manual_seed(args.seed)  # seed dataloader shuffling
+
     for e in range(args.epochs):
+        # check for lr decay
+        if e in args.decay_epochs:
+            lr /= args.lr_decay
+            optim = get_optim(lr)
+
         print('Beginning epoch %d/%d' % (e + 1, args.epochs))
         losses = []
+
         for i, x, y in tqdm(train_loader):
             x, y = x.to(device), y.to(device)
             out = model(x)
@@ -51,8 +66,10 @@ def train(args: TrainingArgs, model, train_loader, test_loader, device=0):
             optim.step()
             optim.zero_grad()
             losses += [loss.item()]
+
         print('Mean loss for epoch %d: %.4f' % (e, sum(losses) / len(losses)))
         print('Test accuracy for epoch %d:' % e, end=' ')
+
         correct_, total_ = test(model, test_loader, device=device)
         total += [total_]
         correct += [correct_]

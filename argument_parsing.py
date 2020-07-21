@@ -131,9 +131,20 @@ class TrainingArgs(Seed):
         'acc_save_path':
             Argument('--acc-save-path', type=str, default='models/accuracies.npz'),
         'lr':
-            Argument('--lr', type=float, default=0.005, help='learning rate for training'),
+            Argument('--lr', type=float, default=0.005, help='initial learning rate for training'),
+        'lr_decay':
+            Argument('--lrd', type=float, default=5, help='divisor for learning rate decay'),
+        'decay_epochs':
+            Argument('--decay-epochs', type=int, nargs='*', default=[60, 120, 160],
+                     help='specify epochs during which to decay learning rate'),
+        'nesterov':
+            Argument('--nesterov', type=bool, default=True, help='whether to use nesterov optimization'),
+        'momentum':
+            Argument('--momentum', type=float, default=0.9, help='momentum for optimization'),
+        'weight_decay':
+            Argument('--weight-decay', type=float, default=5e-4, help='weight decay for optimization'),
         'epochs':
-            Argument('--epochs', type=int, default=100, help='number of epochs to train for'),
+            Argument('--epochs', type=int, default=200, help='number of epochs to train for'),
     }
 
 
