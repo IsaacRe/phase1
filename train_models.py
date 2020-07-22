@@ -17,7 +17,6 @@ def save_model(model, save_path, device=0):
 
 def test(model, loader, device=0):
     with torch.no_grad():
-        model.eval()
         num_classes = model.fc.out_features
         total, correct = np.zeros(num_classes), np.zeros(model.fc.out_features)
         class_idxs = np.arange(num_classes)[None].repeat(loader.batch_size, axis=0)
@@ -31,7 +30,6 @@ def test(model, loader, device=0):
             correct += np.logical_and(pred, y).sum(axis=0)
 
         print('%d/%d (%.2f%%)' % (correct.sum(), total.sum(), correct.sum() / total.sum() * 100.))
-        model.train()
         return correct, total
 
 
@@ -70,7 +68,9 @@ def train(args: TrainingArgs, model, train_loader, test_loader, device=0):
         print('Mean loss for epoch %d: %.4f' % (e, sum(losses) / len(losses)))
         print('Test accuracy for epoch %d:' % e, end=' ')
 
+        model.eval()
         correct_, total_ = test(model, test_loader, device=device)
+        model.train()
         total += [total_]
         correct += [correct_]
         if args.save_acc:
