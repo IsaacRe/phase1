@@ -218,7 +218,7 @@ class PruneFinalArgs(SharedPruneArgs):
     }
 
 
-class SubnetworkSelectionArgs(Seed, NumClass, InitModelPath, FinalModelPath):
+class SubnetworkSelectionArgs(Seed, InitModelPath, FinalModelPath):
     ARGS = {
         'retrain':
             Argument('--retrain', action='store_true', help='retrain the masked subnetwork of the initialized model'),

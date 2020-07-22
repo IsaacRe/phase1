@@ -9,10 +9,12 @@ from utils.model_pruning import ModulePruner, PruneProtocol
 from train_models import test, train, get_dataloaders
 
 
-def load_model(args: NumClass, model_path, device=0):
+def load_model(model_path, device=0):
+    state_dict = torch.load(model_path)
+    num_class = state_dict['fc.weight'].shape[0]
     model = resnet34()
-    model.fc = torch.nn.Linear(model.fc.in_features, args.num_classes, bias=True)
-    model.load_state_dict(torch.load(model_path))
+    model.fc = torch.nn.Linear(model.fc.in_features, num_class, bias=True)
+    model.load_state_dict(state_dict)
     model.cuda(device)
     return model
 
@@ -90,7 +92,7 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
                            train_loader: DataLoader, test_loader: DataLoader,
                            device=0):
     # load final model
-    final_model = load_model(args, args.final_model_path, device=device)
+    final_model = load_model(args.final_model_path, device=device)
     print('Loaded final model from %s' % args.final_model_path)
 
     # test final model accuracy before pruning
@@ -120,7 +122,7 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
     print('Model accuracy using pruning on final model: %.2f' % final_acc)
 
     # load initial model and compute prune masks
-    init_model = load_model(args, args.init_model_path, device=device)
+    init_model = load_model(args.init_model_path, device=device)
     print('Loaded initialized model from %s' % args.init_model_path)
     init_pruner = ModulePruner(init_protocol,
                                device=device,
@@ -185,22 +187,6 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
                  random_subnet_accuracy=random_acc,
                  retrain_subnet_accuracy=retrain_acc,
                  **mask_accuracy_dict)
-
-
-"""
-
-# load test/train dataloaders
-if args.dataset == 'CIFAR':
-    train_loader = get_dataloader_cifar(args.batch_size_train,
-                                        data_dir=args.data_dir,
-                                        num_classes=args.num_classes,
-                                        train=True)
-    test_loader = get_dataloader_cifar(args.batch_size_test,
-                                       data_dir=args.data_dir,
-                                       num_classes=args.num_classes,
-                                       train=False)
-
-"""
 
 
 if __name__ == '__main__':
