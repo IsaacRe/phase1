@@ -1,6 +1,7 @@
 from inspect import getfullargspec
 from utils.helpers import CustomContext
 from torch import Tensor
+import torch
 from torch.nn import Module
 
 
@@ -348,19 +349,25 @@ class HookManager:
     def _forward_pre_hook_base(self, module, inputs):
         self.input_cache[module.name] = inputs
         self.num_module_inputs[module.name] = len(inputs)
-        for inp in inputs:
-            if not inp.requires_grad:
-                inp.requires_grad = True
-            inp.register_hook(self._make_backward_hook_input(module))
+
+        # if grad is enabled, setup backward pass
+        if torch.is_grad_enabled():
+            for inp in inputs:
+                if not inp.requires_grad:
+                    inp.requires_grad = True
+                inp.register_hook(self._make_backward_hook_input(module))
         return self._execute_forward_pre_hooks(module, inputs)
 
     def _forward_hook_base(self, module, input, output):
         self.output_cache[module.name] = output
-        output.register_hook(self._make_backward_hook_output(module))
-        for name, param in module._parameters.items():
-            if param is not None:
-                self.valid_module_params[module.name] += [name]
-                param.register_hook(self._make_backward_hook_param(module, name))
+
+        # if grad is enabled setup backward pass
+        if torch.is_grad_enabled():
+            output.register_hook(self._make_backward_hook_output(module))
+            for name, param in module._parameters.items():
+                if param is not None:
+                    self.valid_module_params[module.name] += [name]
+                    param.register_hook(self._make_backward_hook_param(module, name))
         new_output = self._execute_forward_hooks(module)
         if not self.retain_forward_cache:
             self._clear_forward_module_cache(module)
