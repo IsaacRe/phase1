@@ -258,7 +258,7 @@ class ModulePruner:
         Forward pre-hook to conduct pruning of module weight before that module's forward pass
         parameter before each forward pass of that module is conducted
         :param module: Module object whose weights are being pruned
-        :param inp: Tensor of input to module
+        :param input: Tensor of input to module
         """
         weight_prune_mask = self.prune_masks[module.name]
         if not isinstance(weight_prune_mask, slice):
