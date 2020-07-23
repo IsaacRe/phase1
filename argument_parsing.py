@@ -21,7 +21,23 @@ def get_all_bases(Class, stop_class=object):
 
 def _check_args():
     # attempt to parse all provided arguments
-    CustomParser(AllValidArgs).parse_args()
+    all_args = {}
+    argnames = set()
+    args = set()
+    for ArgClass in all_argsets:
+        for name, arg in ArgClass.ARGS.items():
+            if name in argnames:
+                name += ' '
+            if arg in args:
+                continue
+            all_args[name] = arg
+            argnames = argnames.union({name})
+            args = args.union({arg})
+
+    class AllArgs(ArgumentClass):
+        ARGS = all_args
+
+    CustomParser(AllArgs, allow_overlap=True).parse_args()
 
 
 class Argument:
@@ -33,33 +49,14 @@ class Argument:
 
 class CustomParser(ArgumentParser):
 
-    def __init__(self, ArgClass, *args, **kwargs):
+    def __init__(self, ArgClass, *args, allow_overlap=False, **kwargs):
         super(CustomParser, self).__init__(*args, **kwargs)
         self.ARGUMENT_CLASS = ArgClass
-        if self.ARGUMENT_CLASS == AllValidArgs:
-            self._add_class_args_allow_overlap()
-        else:
-            self._add_class_args()
+        self._add_class_args()
 
     def _add_class_args(self):
         for ArgClass in set([self.ARGUMENT_CLASS] + get_all_bases(self.ARGUMENT_CLASS, stop_class=ArgumentClass)):
             for name, arg in ArgClass.ARGS.items():
-                self.add_argument(*arg.flags, dest=name, **arg.kwargs)
-
-    def _add_class_args_allow_overlap(self):
-        flags, dests = set(), set()
-        for ArgClass in set([self.ARGUMENT_CLASS] + get_all_bases(self.ARGUMENT_CLASS, stop_class=ArgumentClass)):
-            for name, arg in ArgClass.ARGS.items():
-                if name in dests:
-                    name += '_'  # append underscore if multiple flags assign to the same destination
-                repeat_flag = False
-                for flag in arg.flags:
-                    if flag in flags:
-                        repeat_flag = True
-                if repeat_flag:
-                    continue
-                dests = dests.union({name})
-                flags = flags.union(set(arg.flags))
                 self.add_argument(*arg.flags, dest=name, **arg.kwargs)
 
     def parse_defined_args(self) -> Namespace:
@@ -92,6 +89,14 @@ class Seed(ArgumentClass):
     ARGS = {
         'seed':
             Argument('--seed', type=int, default=1, help='seed for random number generators')
+    }
+
+
+class Architecture(ArgumentClass):
+    ARGS = {
+        'arch':
+            Argument('--arch', type=str, default='resnet34', choices=['resnet18', 'resnet34'],
+                     help='model architecture to use')
     }
 
 
@@ -151,7 +156,7 @@ class TrainingArgs(Seed):
 # Arguments exclusively for train_models.py:
 
 
-class ModelInitArgs(Seed, NumClass, InitModelPath):
+class ModelInitArgs(Seed, NumClass, InitModelPath, Architecture):
     ARGS = {
         'pretrained':
             Argument('--pretrained', action='store_true', help='start from pretrained initialization'),
@@ -218,13 +223,14 @@ class PruneFinalArgs(SharedPruneArgs):
     }
 
 
-class SubnetworkSelectionArgs(Seed, InitModelPath, FinalModelPath):
+class LoadModelArgs(InitModelPath, FinalModelPath, Architecture):
+    ARGS = {}
+
+
+class SubnetworkSelectionArgs(Seed, LoadModelArgs):
     ARGS = {
         'retrain':
             Argument('--retrain', action='store_true', help='retrain the masked subnetwork of the initialized model'),
-        'retrain_model_path':
-            Argument('--retrain-model-path', type=str, default='models/retrained-model.pth',
-                     help='path to savefile for retrained subnetwork'),
         'save_results':
             Argument('--save-results', action='store_true', help='save pruning results'),
         'results_filepath':
@@ -233,7 +239,8 @@ class SubnetworkSelectionArgs(Seed, InitModelPath, FinalModelPath):
     }
 
 
-class AllValidArgs(DataArgs, ModelInitArgs,
-                   TrainRefModelArgs, RetrainingArgs, PruneInitArgs, PruneFinalArgs,
-                   SubnetworkSelectionArgs):
-    pass
+all_argsets = [
+    NumClass, Seed, Architecture, DataArgs, InitModelPath, FinalModelPath, TrainingArgs,
+    ModelInitArgs, TrainRefModelArgs, RetrainingArgs, SharedPruneArgs, PruneInitArgs, PruneFinalArgs,
+    SubnetworkSelectionArgs
+]
