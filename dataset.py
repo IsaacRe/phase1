@@ -1,17 +1,18 @@
 import os.path as path
 from torch.utils.data.dataset import Dataset
-from torchvision.datasets import CIFAR100  #, ImageNet
+from torchvision.datasets import CIFAR100, CIFAR10  #, ImageNet
 from torchvision.transforms import Resize, Compose, RandomCrop, RandomHorizontalFlip
 from torchvision.transforms.functional import to_tensor
 from torch.utils.data import DataLoader
 import torch
 import numpy as np
 from PIL import Image
-DATASETS = {'cifar': CIFAR100}
+DATASETS = {'cifar10': CIFAR10, 'cifar100': CIFAR100}
 
 
-def get_dataset_cifar(data_dir='../data', num_classes=100, train=True, download=False):
-    ExtendedDataset = extend_dataset('cifar')
+def get_dataset_cifar(data_dir='../data', num_classes=100, train=False, download=False):
+    dataset = 'cifar10' if num_classes == 10 else 'cifar100'
+    ExtendedDataset = extend_dataset(dataset)
     dataset = ExtendedDataset(data_dir, num_classes=num_classes, train=train, download=download)
     return dataset
 
