@@ -4,8 +4,14 @@ import numpy as np
 import torch
 import torch.nn
 import torch.optim
-from torchvision.models import resnet34
+from torchvision.models import resnet18, resnet34
 from dataset import get_dataloader_cifar
+
+
+model_factories = {
+    'resnet18': resnet18,
+    'resnet34': resnet34
+}
 
 
 def save_model(model, save_path, device=0):
@@ -81,7 +87,7 @@ def train(args: TrainingArgs, model, train_loader, test_loader, device=0):
 def initialize_model(args: ModelInitArgs, device=0):
     # load network
     torch.manual_seed(args.seed)  # seed random network initialization
-    model = resnet34(pretrained=args.pretrained)
+    model = model_factories[args.arch](pretrained=args.pretrained)
     model.fc = torch.nn.Linear(model.fc.in_features, args.num_classes, bias=True)
     if device != 'cpu':
         model.cuda(device)

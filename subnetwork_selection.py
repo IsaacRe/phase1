@@ -4,15 +4,14 @@ import torch.nn
 import torch.optim
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader
-from torchvision.models import resnet34
 from utils.model_pruning import ModulePruner, PruneProtocol
-from train_models import test, train, get_dataloaders
+from train_models import test, train, get_dataloaders, model_factories
 
 
-def load_model(model_path, device=0):
+def load_model(architecture, model_path, device=0):
     state_dict = torch.load(model_path)
     num_class = state_dict['fc.weight'].shape[0]
-    model = resnet34()
+    model = model_factories[architecture]()
     model.fc = torch.nn.Linear(model.fc.in_features, num_class, bias=True)
     model.load_state_dict(state_dict)
     model.cuda(device)
@@ -92,7 +91,7 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
                            train_loader: DataLoader, test_loader: DataLoader,
                            device=0):
     # load final model
-    final_model = load_model(args.final_model_path, device=device)
+    final_model = load_model(args.arch, args.final_model_path, device=device)
     print('Loaded final model from %s' % args.final_model_path)
 
     # test final model accuracy before pruning
@@ -122,7 +121,7 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
     print('Model accuracy using pruning on final model: %.2f' % final_acc)
 
     # load initial model and compute prune masks
-    init_model = load_model(args.init_model_path, device=device)
+    init_model = load_model(args.arch, args.init_model_path, device=device)
     print('Loaded initialized model from %s' % args.init_model_path)
     init_pruner = ModulePruner(init_protocol,
                                device=device,
