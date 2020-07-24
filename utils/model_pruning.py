@@ -117,17 +117,19 @@ class ModulePruner:
                 assert m.tracker == tracker, "passed ModuleTracker '%s' not assigned to Module '%s'" \
                                              " before ModulePruner initialization." % (tracker, m)
 
-        self._mask_by_method_lookup = {
-            method: getattr(self, '_mask_by_%s' % method) for method in PRUNE_METHODS
+        self._setup_method_lookup = {
+            method: getattr(self, '_setup_%s_pruning' % method) for method in PRUNE_METHODS
         }
 
+        # var to track thresholds that will be used for online pruning by output
+        self.online_thresholds = {module_name: None for module_name in self.module_names}
         self.prune_masks = {module_name: None for module_name in self.module_names}
         self.masks_initialized = False
 
         self.register_hooks()
 
         # data_pass args
-        if self.protocol.prune_by not in ['weight', 'online']:
+        if self.protocol.prune_by != 'weight':
             assert not any([arg is None for arg in [dataloader, network]]), \
              "arguments 'dataloader' and 'network' must be specified for pruning option '%s'" % self.protocol.prune_by
         if 'grad' in self.protocol.prune_by:
@@ -140,13 +142,11 @@ class ModulePruner:
 
     def _make_tracker(self):
         prune_by = self.protocol.prune_by
-        if prune_by == 'online':
-            return None
-        elif prune_by == 'weight':
+        if prune_by == 'weight':
             vars_ = []
         elif prune_by == 'weight_gradient':
             vars_ = ['w_grad']
-        elif prune_by == 'output':
+        elif prune_by in ['output', 'online']:
             vars_ = ['out']
         elif prune_by == 'output_gradient':
             vars_ = ['out_grad']
@@ -156,14 +156,20 @@ class ModulePruner:
     def _load_prune_masks(self, load_file):
         raise NotImplementedError()
 
+    def _load_online_thresholds(self, load_file):
+        raise NotImplementedError()
+
     def _save_prune_masks(self, save_file):
         raise NotImplementedError()
 
-    def _mask_by_weight(self,
-                        prune_across_modules=False,
-                        fix_prune_ratio=True,
-                        prune_ratio=0.95,
-                        prune_threshold=0.5):
+    def _save_online_thresholds(self, save_file):
+        raise NotImplementedError()
+
+    def _setup_weight_pruning(self,
+                              prune_across_modules=False,
+                              fix_prune_ratio=True,
+                              prune_ratio=0.95,
+                              prune_threshold=0.5):
         if prune_across_modules:
 
             max_prune, min_prune = 0, 1
@@ -199,11 +205,11 @@ class ModulePruner:
                 mask = weight < prune_threshold
                 self.prune_masks[name] = mask
 
-    def _mask_by_weight_gradient(self,
-                                 prune_across_modules=False,
-                                 fix_prune_ratio=True,
-                                 prune_ratio=0.95,
-                                 prune_threshold=0.1):
+    def _setup_weight_gradient_pruning(self,
+                                       prune_across_modules=False,
+                                       fix_prune_ratio=True,
+                                       prune_ratio=0.95,
+                                       prune_threshold=0.1):
         # accumulate gradient of weights
         w_grads = self.tracker.aggregate_vars(self.dataloader, network=self.network, device=self.device)
         if prune_across_modules:
@@ -216,54 +222,65 @@ class ModulePruner:
                 mask = mean_w_grad < prune_threshold
                 self.prune_masks[name] = mask
 
-    def _mask_by_output(self,
-                        prune_across_modules=False,
-                        fix_prune_ratio=True,
-                        prune_ratio=0.95,
-                        prune_threshold=0.5):
+    def _setup_output_pruning(self,
+                              prune_across_modules=False,
+                              fix_prune_ratio=True,
+                              prune_ratio=0.95,
+                              prune_threshold=0.5):
         raise NotImplementedError()
 
-    def _mask_by_output_gradient(self,
-                                 prune_across_modules=False,
-                                 fix_prune_ratio=True,
-                                 prune_ratio=0.95,
-                                 prune_threshold=0.5):
-        raise NotImplementedError()
-
-    def _set_prune_masks(self, prune_by='weight_magnitude',
-                         load_prune_masks=False,
-                         save_prune_masks=False,
-                         prune_masks_filepath=None,
-                         **prune_kwargs):
-        if load_prune_masks:
-            self._load_prune_masks(prune_masks_filepath)
+    def _setup_online_pruning(self,
+                              prune_across_modules=False,
+                              fix_prune_ratio=True,
+                              prune_ratio=0.95,
+                              prune_threshold=0.5):
+        outs = self.tracker.aggregate_vars(self.dataloader, network=self.network, device=self.device)
+        if prune_across_modules:
+            raise NotImplementedError()
         else:
-            self._mask_by_method_lookup[prune_by](**prune_kwargs)
+            if fix_prune_ratio:
+                for name, module in self.modules.items():
+                    mean_out = np.maximum(outs[name]['out'], 0)
+                    self.online_thresholds[name] = np.percentile(mean_out, prune_ratio * 100.)
+            else:
+                self.online_thresholds = {module_name: prune_threshold for module_name in self.module_names}
+
+    def _setup_output_gradient_pruning(self,
+                                       prune_across_modules=False,
+                                       fix_prune_ratio=True,
+                                       prune_ratio=0.95,
+                                       prune_threshold=0.5):
+        raise NotImplementedError()
+
+    def _setup_pruning(self,
+                       prune_by='weight_magnitude',
+                       load_prune_masks=False,
+                       save_prune_masks=False,
+                       prune_masks_filepath=None,
+                       **prune_kwargs):
+        if load_prune_masks:
+            if prune_by == 'online':
+                self._load_online_thresholds(prune_masks_filepath)
+            else:
+                self._load_prune_masks(prune_masks_filepath)
+        else:
+            self._setup_method_lookup[prune_by](**prune_kwargs)
         if save_prune_masks:
-            self._save_prune_masks(prune_masks_filepath)
+            if prune_by == 'online':
+                self._save_online_thresholds(prune_masks_filepath)
+            else:
+                self._save_prune_masks(prune_masks_filepath)
         self.masks_initialized = True
 
-    def _mask_by_online(self, output,
-                               fix_prune_ratio=True,
-                               prune_ratio=0.95,
-                               prune_threshold=0.5,
-                               **proto_kwargs):
+    def _mask_online(self, module, output):
         """
         Performs masking of output for online pruning
-        """
-        abs_out = output.data.cpu().abs()
-        if fix_prune_ratio:
-            prune_threshold = np.percentile(abs_out, prune_ratio * 100.)
-        output[abs_out < prune_threshold] = 0.0
-        return output
-
-    def prune_online_forward_hook(self, output):
-        """
-        Forward hook to conduct pruning of module output based online (using batch output magnitude)
+        :param module: Module whose output is being pruned
         :param output: Tensor output by module
         :return: Tensor of pruned output
         """
-        return self._mask_by_online(output, **self.protocol)
+        output[output < self.online_thresholds[module.name]] = 0.0
+        return output
 
     def forward_hook(self, module, input, output):
         """
@@ -304,8 +321,8 @@ class ModulePruner:
                                                         activate=False,
                                                         **self.modules)
         elif prune_by == 'online':
-            self.hook_manager.register_forward_hook(self.prune_online_forward_hook,
-                                                    hook_fn_name='ModulePruner.prune_online_forward_hook',
+            self.hook_manager.register_forward_hook(self._mask_online,
+                                                    hook_fn_name='ModulePruner._mask_online',
                                                     activate=False,
                                                     **self.modules)
         # if conducting output-pruning, register forward_hook
@@ -320,18 +337,19 @@ class ModulePruner:
 
     def clear_prune_masks(self):
         self.prune_masks = {module_name: None for module_name in self.module_names}
+        self.online_thresholds = {module_name: None for module_name in self.modules}
         self.masks_initialized = False
 
     def prune(self, recompute_masks: bool = False, clear_on_exit: bool = False):
         enter_fns = []
         exit_fns = []
-        if (recompute_masks or not self.masks_initialized) and self.protocol.prune_by != 'online':
-            enter_fns += [lambda: self._set_prune_masks(**self.protocol)]
+        if recompute_masks or not self.masks_initialized:
+            enter_fns += [lambda: self._setup_pruning(**self.protocol)]
         if clear_on_exit:
             exit_fns += [self.clear_prune_masks]
         return self.hook_manager.hook_all_context(hook_types=[self.forward_hook,
                                                               self.forward_pre_hook,
-                                                              self.prune_online_forward_hook],
+                                                              self._mask_online],
                                                   add_enter_fns=enter_fns,
                                                   add_exit_fns=exit_fns)
 
@@ -343,7 +361,9 @@ class ModulePruner:
             self.prune_masks[module_name] = prune_mask
 
     def compute_prune_masks(self, reset=False):
-        self._set_prune_masks(**self.protocol)
+        assert self.protocol.prune_by != 'online', \
+            'cannot compute prune masks staticly when conducting online pruning'
+        self._setup_pruning(**self.protocol)
         mask_dict = self.get_prune_masks()
         if reset:
             self.clear_prune_masks()

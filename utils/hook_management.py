@@ -527,10 +527,8 @@ class HookManager:
     def hook_module_context(self, *modules, hook_types=[], add_enter_fns=[], add_exit_fns=[]):
         enter_fns = [lambda: self.activate_module_hooks(*modules, hook_types=hook_types)]
         exit_fns = [lambda: self.deactivate_module_hooks(*modules, hook_types=hook_types)]
-        for fn in add_enter_fns:
-            enter_fns += [fn]
-        for fn in add_exit_fns:
-            exit_fns += [fn]
+        enter_fns = list(add_enter_fns) + enter_fns
+        exit_fns = exit_fns + list(add_exit_fns)
         return CustomContext(enter_fns=enter_fns, exit_fns=exit_fns)
 
     def hook_module_context_by_name(self, *module_names, hook_types=[], add_enter_fns=[], add_exit_fns=[]):

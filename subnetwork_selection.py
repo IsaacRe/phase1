@@ -203,10 +203,11 @@ def activation_pruning_experiments(args: SubnetworkSelectionArgs, protocol: Prun
 
     pruner = ModulePruner(protocol,
                           device=device,
+                          dataloader=test_loader,
                           network=model)
 
     print('Testing final model accuracy with real-time activation pruning')
-    with pruner.prune():
+    with pruner.prune(clear_on_exit=True):
         retrain_bn(model, train_loader, device=device)
         model.eval()
         correct, total = test(model, test_loader, device=device)
