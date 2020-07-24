@@ -7,7 +7,7 @@ from utils.helpers import Protocol, get_named_modules_from_network
 from utils.model_tracking import ModuleTracker, TrackingProtocol
 
 
-PRUNE_METHODS = ['weight', 'weight_gradient', 'output', 'output_online', 'output_gradient']
+PRUNE_METHODS = ['weight', 'weight_gradient', 'output', 'online', 'output_gradient']
 
 DEFAULT_PRUNE_PROTOCOL = {
     'prune_by': 'weight',
@@ -31,7 +31,7 @@ DEFAULT_PRUNE_METHOD_PROTOCOLS = {
         'prune_masks_filepath': 'prune-masks/prune-by-output.npz',
         'prune_threshold': 0.4
     },
-    'output_online': {
+    'online': {
         'prune_masks_filepath': None,
         'prune_threshold': 0.4
     },
@@ -127,7 +127,7 @@ class ModulePruner:
         self.register_hooks()
 
         # data_pass args
-        if self.protocol.prune_by not in ['weight', 'output_online']:
+        if self.protocol.prune_by not in ['weight', 'online']:
             assert not any([arg is None for arg in [dataloader, network]]), \
              "arguments 'dataloader' and 'network' must be specified for pruning option '%s'" % self.protocol.prune_by
         if 'grad' in self.protocol.prune_by:
@@ -140,7 +140,7 @@ class ModulePruner:
 
     def _make_tracker(self):
         prune_by = self.protocol.prune_by
-        if prune_by == 'output_online':
+        if prune_by == 'online':
             return None
         elif prune_by == 'weight':
             vars_ = []
@@ -243,7 +243,7 @@ class ModulePruner:
             self._save_prune_masks(prune_masks_filepath)
         self.masks_initialized = True
 
-    def _mask_by_output_online(self, output,
+    def _mask_by_online(self, output,
                                fix_prune_ratio=True,
                                prune_ratio=0.95,
                                prune_threshold=0.5,
@@ -263,7 +263,7 @@ class ModulePruner:
         :param output: Tensor output by module
         :return: Tensor of pruned output
         """
-        return self._mask_by_output_online(output, **self.protocol)
+        return self._mask_by_online(output, **self.protocol)
 
     def forward_hook(self, module, input, output):
         """
@@ -303,7 +303,7 @@ class ModulePruner:
                                                         hook_fn_name='ModulePruner.forward_pre_hook',
                                                         activate=False,
                                                         **self.modules)
-        elif prune_by == 'output_online':
+        elif prune_by == 'online':
             self.hook_manager.register_forward_hook(self.prune_online_forward_hook,
                                                     hook_fn_name='ModulePruner.prune_online_forward_hook',
                                                     activate=False,
@@ -325,7 +325,7 @@ class ModulePruner:
     def prune(self, recompute_masks: bool = False, clear_on_exit: bool = False):
         enter_fns = []
         exit_fns = []
-        if (recompute_masks or not self.masks_initialized) and self.protocol.prune_by != 'output_online':
+        if (recompute_masks or not self.masks_initialized) and self.protocol.prune_by != 'online':
             enter_fns += [lambda: self._set_prune_masks(**self.protocol)]
         if clear_on_exit:
             exit_fns += [self.clear_prune_masks]

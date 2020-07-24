@@ -192,7 +192,7 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
 def activation_pruning_experiments(args: SubnetworkSelectionArgs, protocol: PruneProtocol,
                                    train_loader: DataLoader, test_loader: DataLoader,
                                    device=0):
-    protocol.prune_by = 'output_online'
+    protocol.prune_by = 'online'
     model = load_model(args.arch, args.final_model_path, device=device)
     model.eval()
 
