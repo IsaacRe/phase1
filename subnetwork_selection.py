@@ -92,6 +92,7 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
                            device=0):
     # load final model
     final_model = load_model(args.arch, args.final_model_path, device=device)
+    final_model.eval()
     print('Loaded final model from %s' % args.final_model_path)
 
     # test final model accuracy before pruning
@@ -101,7 +102,7 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
     acc_no_prune = correct.sum() / total.sum() * 100.
     print('Model accuracy before pruning: %.2f' % acc_no_prune)
     """
-    acc_no_prune = 76.1
+    acc_no_prune = 66.76
 
     # compute reference prune masks
     final_pruner = ModulePruner(final_protocol,
@@ -157,6 +158,7 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
         return neg_mask
 
     # test final model with random pruning
+    """
     random_masks = {name: make_random_mask(mask) for name, mask in init_masks.items()}
     final_pruner.set_prune_masks(**random_masks)
     with final_pruner.prune(clear_on_exit=True):
@@ -165,7 +167,6 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
     print('Model accuracy using random pruning: %.2f' % random_acc)
     """
     random_acc = None
-    """
 
     retrain_acc = None
     if args.retrain:
@@ -188,10 +189,36 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
                  **mask_accuracy_dict)
 
 
+def activation_pruning_experiments(args: SubnetworkSelectionArgs, protocol: PruneProtocol,
+                                   train_loader: DataLoader, test_loader: DataLoader,
+                                   device=0):
+    protocol.prune_by = 'output_online'
+    model = load_model(args.arch, args.final_model_path, device=device)
+    model.eval()
+
+    print('Testing final model accuracy before pruning')
+    #correct, total = test(model, test_loader, device=device)
+    #acc_no_prune = correct.sum() / total.sum() * 100.
+    #print('Model accuracy before pruning: %.2f' % acc_no_prune)
+
+    pruner = ModulePruner(protocol,
+                          device=device,
+                          network=model)
+
+    print('Testing final model accuracy with real-time activation pruning')
+    with pruner.prune():
+        retrain_bn(model, train_loader, device=device)
+        model.eval()
+        correct, total = test(model, test_loader, device=device)
+    prune_acc = correct.sum() / total.sum() * 100.
+    print('Model accuracy with pruning: %.2f' % prune_acc)
+
+
 if __name__ == '__main__':
     args, prune_init_args, prune_final_args, data_args, train_args = \
         parse_args(SubnetworkSelectionArgs, PruneInitArgs, PruneFinalArgs, DataArgs, RetrainingArgs)
     init_protocol = PruneProtocol(namespace=prune_init_args)
     final_protocol = PruneProtocol(namespace=prune_final_args)
     dataloaders = get_dataloaders(data_args)
+    activation_pruning_experiments(args, final_protocol, *dataloaders, device=0)
     subnetwork_experiments(args, train_args, init_protocol, final_protocol, *dataloaders, device=0)
