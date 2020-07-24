@@ -292,8 +292,6 @@ class HookManager:
         for handle in self.get_module_hooks(module, category='forward_hook', include_inactive=False):
             hook_fn = handle.hook_fn
             ret = hook_fn(output=output, **param_dict)
-            if type(ret) == Tensor:
-                ret = (ret,)
             if ret is not None:
                 output = ret
 
