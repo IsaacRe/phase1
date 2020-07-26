@@ -292,12 +292,18 @@ class ModuleTracker:
         return self.hook_manager.hook_all_context(hook_types=[self.forward_hook, self.backward_hook],
                                                   add_exit_fns=exit_fns)
 
-    def aggregate_vars(self, dataloader: DataLoader, network: Module = None, device: int = 0):
+    def collect_vars(self, dataloader: DataLoader, network: Module = None, device: int = 0):
         if network is None:
             assert self.network is not None, "network must be passed to aggregate_vars if one" \
                                              " was not passed to __init__"
             network = self.network
         backward_fn = torch.nn.CrossEntropyLoss() if self.protocol.track_backward else None
-        with self.track():
+        with self.track(clear_on_exit=False):
             data_pass(dataloader, network, device=device, backward_fn=backward_fn)
-            return self.gather_data()
+
+    def aggregate_vars(self, dataloader: DataLoader, network: Module = None, device: int = 0, clear=True):
+        self.collect_vars(dataloader, network=network, device=device)
+        ret = self.gather_data()
+        if clear:
+            self.clear_data_buffer_all()
+        return ret

@@ -234,14 +234,16 @@ class ModulePruner:
                               fix_prune_ratio=True,
                               prune_ratio=0.95,
                               prune_threshold=0.5):
-        outs = self.tracker.aggregate_vars(self.dataloader, network=self.network, device=self.device)
+        self.tracker.collect_vars(self.dataloader, network=self.network, device=self.device)
         if prune_across_modules:
             raise NotImplementedError()
         else:
             if fix_prune_ratio:
                 for name, module in self.modules.items():
-                    mean_out = np.maximum(outs[name]['out'], 0)
-                    self.online_thresholds[name] = np.percentile(mean_out, prune_ratio * 100.)
+                    outs = self.tracker.gather_module_var(name, 'out')
+                    self.tracker.clear_data_buffer_module(name)
+                    outs = np.maximum(outs, 0)
+                    self.online_thresholds[name] = np.percentile(outs, prune_ratio * 100.)
             else:
                 self.online_thresholds = {module_name: prune_threshold for module_name in self.module_names}
 
