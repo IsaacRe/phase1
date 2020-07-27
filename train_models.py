@@ -100,11 +100,13 @@ def get_dataloaders(args: DataArgs):
         train_loader = get_dataloader_cifar(args.batch_size_train,
                                             data_dir=args.data_dir,
                                             num_classes=args.num_classes,
-                                            train=True)
+                                            train=True,
+                                            num_workers=args.num_workers)
         test_loader = get_dataloader_cifar(args.batch_size_test,
                                            data_dir=args.data_dir,
                                            num_classes=args.num_classes,
-                                           train=False)
+                                           train=False,
+                                           num_workers=args.num_workers)
     return train_loader, test_loader
 
 

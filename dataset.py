@@ -18,12 +18,12 @@ def get_dataset_cifar(data_dir='../data', num_classes=100, train=False, download
 
 
 def get_dataloader_cifar(batch_size=100, data_dir='../data', num_classes=100, train=True, shuffle=True,
-                         download=False):
+                         download=False, num_workers=4):
     dataset = get_dataset_cifar(data_dir=data_dir, num_classes=num_classes, train=train,
                                 download=download)
     if not train:
         shuffle = False
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
     return loader
 
 

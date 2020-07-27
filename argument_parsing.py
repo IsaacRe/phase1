@@ -109,7 +109,9 @@ class DataArgs(NumClass):
         'batch_size_train':
             Argument('--batch-size-train', type=int, default=100, help='batch size for training'),
         'batch_size_test':
-            Argument('--batch-size-test', type=int, default=100, help='batch size for testing')
+            Argument('--batch-size-test', type=int, default=100, help='batch size for testing'),
+        'num_workers':
+            Argument('--num-workers', type=int, default=4, help='number of dataloader workers')
     }
 
 
