@@ -85,8 +85,23 @@ def compute_mask_accuracy(masks, ref_masks):
     return ret_dict
 
 
-# TODO
-def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: RetrainingArgs,
+def get_pruners(*protocols: PruneProtocol, device=0, networks=None, dataloaders=None):
+    if networks:
+        assert len(networks) == len(protocols)
+    else:
+        networks = [None] * len(protocols)
+    if dataloaders:
+        assert len(dataloaders) == len(protocols)
+    else:
+        dataloaders = [None] * len(protocols)
+    return (ModulePruner(protocol,
+                         device=device,
+                         network=network,
+                         dataloader=dataloader)
+            for protocol, network, dataloader in zip(protocols, networks, dataloaders))
+
+
+def subnetwork_experiments(args: ExperimentArgs,
                            init_protocol: PruneProtocol, final_protocol: PruneProtocol,
                            train_loader: DataLoader, test_loader: DataLoader,
                            device=0):
@@ -94,6 +109,10 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
     final_model = load_model(args.arch, args.final_model_path, device=device)
     final_model.eval()
     print('Loaded final model from %s' % args.final_model_path)
+
+    # load initial model
+    init_model = load_model(args.arch, args.init_model_path, device=device)
+    print('Loaded initialized model from %s' % args.init_model_path)
 
     # test final model accuracy before pruning
     """
@@ -103,6 +122,11 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
     print('Model accuracy before pruning: %.2f' % acc_no_prune)
     """
     acc_no_prune = 66.76
+
+    # get pruners
+    final_pruner, init_pruner = get_pruners(final_protocol, init_protocol,
+                                            device=device,
+                                            networks=(final_model, init_model))
 
     # compute reference prune masks
     final_pruner = ModulePruner(final_protocol,
@@ -121,21 +145,9 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
     final_acc = correct.sum() / total.sum() * 100.
     print('Model accuracy using pruning on final model: %.2f' % final_acc)
 
-    # load initial model and compute prune masks
-    init_model = load_model(args.arch, args.init_model_path, device=device)
-    print('Loaded initialized model from %s' % args.init_model_path)
-    init_pruner = ModulePruner(init_protocol,
-                               device=device,
-                               network=init_model)
+    # compute initial prune masks
     print('Computing prune masks for initialized model...')
     init_masks = init_pruner.compute_prune_masks(reset=not args.retrain)
-
-    # compute overlap between prune masks
-    print('Computing overlap between prune masks of initialized model and final model...')
-    mask_accuracy_dict = compute_mask_accuracy(init_masks, final_masks)
-    print('Mean mask accuracy: %.2f' % mask_accuracy_dict['mean_accuracy'])
-    print('Mean mask retained recall: %.2f' % mask_accuracy_dict['mean_retained_recall'])
-    print('Mean mask pruned recall: %.2f' % mask_accuracy_dict['mean_pruned_recall'])
 
     # test final model performance when initial prune mask is used
     print('Testing final model performance after pruning from model at initialization...')
@@ -146,6 +158,13 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
         correct, total = test(final_model, test_loader, device=device)
     init_acc = correct.sum() / total.sum() * 100.
     print('Model accuracy using pruning at model initialization: %.2f' % init_acc)
+
+    # compute overlap between prune masks
+    print('Computing overlap between prune masks of initialized model and final model...')
+    mask_accuracy_dict = compute_mask_accuracy(init_masks, final_masks)
+    print('Mean mask accuracy: %.2f' % mask_accuracy_dict['mean_accuracy'])
+    print('Mean mask retained recall: %.2f' % mask_accuracy_dict['mean_retained_recall'])
+    print('Mean mask pruned recall: %.2f' % mask_accuracy_dict['mean_pruned_recall'])
 
     # test final model performance with random prune mask
     print('Testing final model performance after random pruning...')
@@ -168,16 +187,6 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
     """
     random_acc = None
 
-    retrain_acc = None
-    if args.retrain:
-        with final_pruner.prune(clear_on_exit=True):
-            print('Retraining pruned subnetwork of model at initialization...')
-            train(train_args, init_model, train_loader, test_loader, device=device)
-            print('Testing retrained subnetwork performance...')
-            correct, total = test(init_model, test_loader, device=device)
-            retrain_acc = correct.sum() / total.sum() * 100.
-            print('Retrained subnetwork accuracy: %.2f' % retrain_acc)
-
     if args.save_results:
         print('Saving experiment results to %s' % args.results_filepath)
         np.savez(args.results_filepath,
@@ -185,11 +194,10 @@ def subnetwork_experiments(args: SubnetworkSelectionArgs, train_args: Retraining
                  init_subnet_accuracy=init_acc,
                  final_subnet_accuracy=final_acc,
                  random_subnet_accuracy=random_acc,
-                 retrain_subnet_accuracy=retrain_acc,
                  **mask_accuracy_dict)
 
 
-def activation_pruning_experiments(args: SubnetworkSelectionArgs, protocol: PruneProtocol,
+def activation_pruning_experiments(args: ExperimentArgs, protocol: PruneProtocol,
                                    train_loader: DataLoader, test_loader: DataLoader,
                                    device=0):
     protocol.prune_by = 'online'
@@ -215,11 +223,46 @@ def activation_pruning_experiments(args: SubnetworkSelectionArgs, protocol: Prun
     print('Model accuracy with pruning: %.2f' % prune_acc)
 
 
+def retrain_experiments(args: ExperimentArgs, train_args: RetrainingArgs,
+                        final_protocol: PruneProtocol, init_protocol: PruneProtocol,
+                        train_loader: DataLoader, test_loader: DataLoader,
+                        use_final_subnetwork=True,
+                        device=0):
+    # load init model
+    init_model = load_model(args.arch, args.init_model_path, device=device)
+    init_model.eval()
+    print('Loaded initialized model from %s' % args.init_model_path)
+
+    (init_pruner,) = get_pruners(init_protocol,
+                                 device=device,
+                                 networks=(init_model,))
+
+    if use_final_subnetwork:
+        # load final model
+        final_model = load_model(args.arch, args.final_model_path, device=device)
+        print('Loaded final model from %s' % args.final_model_path)
+
+        (final_pruner,) = get_pruners(final_protocol,
+                                      device=device,
+                                      networks=(final_model,))
+
+        init_pruner.set_prune_masks(**final_pruner.compute_prune_masks(reset=True))
+        del final_model
+
+    with init_pruner.prune(clear_on_exit=True, recompute_masks=False):
+        print('Retraining pruned subnetwork of model at initialization...')
+        train(train_args, init_model, train_loader, test_loader, device=device)
+
+
 if __name__ == '__main__':
     args, prune_init_args, prune_final_args, data_args, train_args = \
-        parse_args(SubnetworkSelectionArgs, PruneInitArgs, PruneFinalArgs, DataArgs, RetrainingArgs)
+        parse_args(ExperimentArgs, PruneInitArgs, PruneFinalArgs, DataArgs, RetrainingArgs)
     init_protocol = PruneProtocol(namespace=prune_init_args)
     final_protocol = PruneProtocol(namespace=prune_final_args)
     dataloaders = get_dataloaders(data_args)
-    activation_pruning_experiments(args, final_protocol, *dataloaders, device=0)
-    subnetwork_experiments(args, train_args, init_protocol, final_protocol, *dataloaders, device=0)
+
+    # Run experiments
+    #activation_pruning_experiments(args, final_protocol, *dataloaders, device=0)
+    #subnetwork_experiments(args, init_protocol, final_protocol, *dataloaders, device=0)
+    retrain_experiments(args, train_args, init_protocol, final_protocol, *dataloaders,
+                        use_final_subnetwork=args.use_final_subnetwork, device=0)

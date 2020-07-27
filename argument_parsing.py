@@ -227,10 +227,13 @@ class LoadModelArgs(InitModelPath, FinalModelPath, Architecture):
     ARGS = {}
 
 
-class SubnetworkSelectionArgs(Seed, LoadModelArgs):
+class ExperimentArgs(Seed, LoadModelArgs):
     ARGS = {
         'retrain':
             Argument('--retrain', action='store_true', help='retrain the masked subnetwork of the initialized model'),
+        'use_final_subnetwork':
+            Argument('--use-init-subnetwork', action='store_false',
+                     help='use the prune mask obtained from initialized model rather than from the final model'),
         'save_results':
             Argument('--save-results', action='store_true', help='save pruning results'),
         'results_filepath':
@@ -242,5 +245,5 @@ class SubnetworkSelectionArgs(Seed, LoadModelArgs):
 all_argsets = [
     NumClass, Seed, Architecture, DataArgs, InitModelPath, FinalModelPath, TrainingArgs,
     ModelInitArgs, TrainRefModelArgs, RetrainingArgs, SharedPruneArgs, PruneInitArgs, PruneFinalArgs,
-    SubnetworkSelectionArgs
+    ExperimentArgs
 ]
