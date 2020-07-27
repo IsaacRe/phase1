@@ -126,6 +126,7 @@ class TrackingProtocol(Protocol):
 
 
 class ModuleTracker:
+    # TODO implement buffer length management
 
     def __init__(self, protocol: TrackingProtocol, *modules: Module,
                  hook_manager: HookManager = None, network: Module = None,
