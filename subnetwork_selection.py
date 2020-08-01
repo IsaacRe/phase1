@@ -4,7 +4,9 @@ import torch.nn
 import torch.optim
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader
+from utils.helpers import get_named_modules_from_network
 from utils.model_pruning import ModulePruner, PruneProtocol
+from utils.model_tracking import ModuleTracker, TrackingProtocol
 from train_models import test, train, get_dataloaders, model_factories
 
 
@@ -197,32 +199,6 @@ def subnetwork_experiments(args: ExperimentArgs,
                  **mask_accuracy_dict)
 
 
-def activation_pruning_experiments(args: ExperimentArgs, protocol: PruneProtocol,
-                                   train_loader: DataLoader, test_loader: DataLoader,
-                                   device=0):
-    protocol.prune_by = 'online'
-    model = load_model(args.arch, args.final_model_path, device=device)
-    model.eval()
-
-    print('Testing final model accuracy before pruning')
-    #correct, total = test(model, test_loader, device=device)
-    #acc_no_prune = correct.sum() / total.sum() * 100.
-    #print('Model accuracy before pruning: %.2f' % acc_no_prune)
-
-    pruner = ModulePruner(protocol,
-                          device=device,
-                          dataloader=test_loader,
-                          network=model)
-
-    print('Testing final model accuracy with real-time activation pruning')
-    with pruner.prune(clear_on_exit=True):
-        retrain_bn(model, train_loader, device=device)
-        model.eval()
-        correct, total = test(model, test_loader, device=device)
-    prune_acc = correct.sum() / total.sum() * 100.
-    print('Model accuracy with pruning: %.2f' % prune_acc)
-
-
 def retrain_experiments(args: ExperimentArgs, train_args: RetrainingArgs,
                         final_protocol: PruneProtocol, init_protocol: PruneProtocol,
                         train_loader: DataLoader, test_loader: DataLoader,
@@ -254,6 +230,48 @@ def retrain_experiments(args: ExperimentArgs, train_args: RetrainingArgs,
         train(train_args, init_model, train_loader, test_loader, device=device)
 
 
+def activation_pruning_experiments(args: ExperimentArgs, protocol: PruneProtocol,
+                                   train_loader: DataLoader, test_loader: DataLoader,
+                                   device=0):
+    protocol.prune_by = 'online'
+    model = load_model(args.arch, args.final_model_path, device=device)
+    model.eval()
+
+    print('Testing final model accuracy before pruning')
+    #correct, total = test(model, test_loader, device=device)
+    #acc_no_prune = correct.sum() / total.sum() * 100.
+    #print('Model accuracy before pruning: %.2f' % acc_no_prune)
+
+    pruner = ModulePruner(protocol,
+                          device=device,
+                          dataloader=test_loader,
+                          network=model)
+
+    print('Testing final model accuracy with real-time activation pruning')
+    with pruner.prune(clear_on_exit=True):
+        retrain_bn(model, train_loader, device=device)
+        model.eval()
+        correct, total = test(model, test_loader, device=device)
+    prune_acc = correct.sum() / total.sum() * 100.
+    print('Model accuracy with pruning: %.2f' % prune_acc)
+
+
+def subnetwork_activation_study(args: ExperimentArgs, train_loader: DataLoader, test_loader: DataLoader,
+                                device=0):
+    network = load_model(args.arch, args.final_model_path, device=device)
+    tracker = ModuleTracker(TrackingProtocol('out'), **get_named_modules_from_network(network))
+
+    i, x, y = next(iter(train_loader))
+    x, y = x.to(device), y.to(device)
+
+    loss_fn = torch.nn.CrossEntropyLoss()
+    with tracker.track():
+        out = network(x)
+        loss = loss_fn(out, y)
+        loss.backward()
+        return
+
+
 if __name__ == '__main__':
     args, prune_init_args, prune_final_args, data_args, train_args = \
         parse_args(ExperimentArgs, PruneInitArgs, PruneFinalArgs, DataArgs, RetrainingArgs)
@@ -266,3 +284,4 @@ if __name__ == '__main__':
     #subnetwork_experiments(args, init_protocol, final_protocol, *dataloaders, device=0)
     retrain_experiments(args, train_args, init_protocol, final_protocol, *dataloaders,
                         use_final_subnetwork=args.use_final_subnetwork, device=0)
+    #subnetwork_activation_study(args, *dataloaders, device=0)
