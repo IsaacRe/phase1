@@ -8,6 +8,30 @@ from utils.model_tracking import ModuleTracker, TrackingProtocol
 
 
 PRUNE_METHODS = ['weight', 'weight_gradient', 'output', 'online', 'output_gradient']
+"""
+The following pruning functionalities are implemented:
+    weight:
+        When prune() is called, all weights with lowest magnitude will be pruned. While pruner is active,
+        these weights will be set to zero before each forward pass.
+    weight_gradient:
+        When prune() is called, gradient wrt weight will be evaluated for all weights using provided
+        dataloader. Weights whose magnitude of average gradient over all data is the lowest will be pruned.
+        While pruner is active, these weights will be set to zero before each forward pass.
+    output:
+        When prune() is called, outputs of all neurons will be computed for all neurons using provided
+        dataloader. Neurons with the lowest average output value will be pruned.
+        While pruner is active, these neuron outputs will be set to zero after each layer's forward pass.
+        The altered output will be provided as the next layer's input.
+    online:
+        When prune() is called, pruning threshold will be computed (if not specified). While pruner is active,
+        neuron outputs that fall below this threshold will be set to zero after each layer's
+        forward pass. The altered output will be provided as the next layer's input.
+    output_gradient:
+        When prune() is called, gradient wrt neuron output will be computed for all neurons using provided
+        dataloader. Neurons whose average magnitude of gradient over all data is the lowest will be pruned.
+        While pruner is active, these neuron outputs will be set to zero after each layer's forward pass.
+        The altered output will be provided as the next layer's input.
+"""
 
 DEFAULT_PRUNE_PROTOCOL = {
     'prune_by': 'weight',
