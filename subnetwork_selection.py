@@ -10,6 +10,16 @@ from utils.model_tracking import ModuleTracker, TrackingProtocol
 from train_models import test, train, get_dataloaders, model_factories
 
 
+def deactivate_bn(network: torch.nn.Module):
+    def deactivate_if_bn(module):
+        if isinstance(module, torch.nn.BatchNorm2d):
+            module.reset_parameters()
+            module.eval()
+            module.weight.data.fill_(1.0)
+            module.bias.data.zero_()
+    network.apply(deactivate_if_bn)
+
+
 def load_model(architecture, model_path, device=0):
     state_dict = torch.load(model_path)
     num_class = state_dict['fc.weight'].shape[0]
@@ -18,6 +28,10 @@ def load_model(architecture, model_path, device=0):
     model.load_state_dict(state_dict)
     model.cuda(device)
     return model
+
+
+def ratio_thresholded(tensor, t):
+    return len(np.where(tensor.cpu() > t)[0]) / tensor.flatten().shape[0]
 
 
 def retrain_bn(model, train_loader: DataLoader, device=0):
@@ -266,6 +280,7 @@ def subnetwork_activation_study(args: ExperimentArgs, train_loader: DataLoader, 
 
     loss_fn = torch.nn.CrossEntropyLoss()
     with tracker.track():
+        deactivate_bn(network)
         out = network(x)
         loss = loss_fn(out, y)
         loss.backward()
@@ -282,6 +297,6 @@ if __name__ == '__main__':
     # Run experiments
     #activation_pruning_experiments(args, final_protocol, *dataloaders, device=0)
     #subnetwork_experiments(args, init_protocol, final_protocol, *dataloaders, device=0)
-    retrain_experiments(args, train_args, init_protocol, final_protocol, *dataloaders,
-                        use_final_subnetwork=args.use_final_subnetwork, device=0)
-    #subnetwork_activation_study(args, *dataloaders, device=0)
+    #retrain_experiments(args, train_args, init_protocol, final_protocol, *dataloaders,
+    #                    use_final_subnetwork=args.use_final_subnetwork, device=0)
+    subnetwork_activation_study(args, *dataloaders, device=0)
