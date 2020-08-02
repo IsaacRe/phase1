@@ -244,8 +244,23 @@ class ExperimentArgs(Seed, LoadModelArgs):
     }
 
 
+# Arguments exclusively for subnetwork_selection.sparse_grad_training
+
+
+class SparseTrainingArgs(TrainingArgs):
+    ARGS = {
+        'model_save_path':
+            Argument('--sparse-train-model-path', type=str, default='models/sparse-trained-model.pth',
+                     help='path to save the sparse-gradient-training model to'),
+        'mean_max_coef':
+            Argument('--mean-max-coef', type=float, default=6,
+                     help='weighting of mean gradient magnitude against max gradient magnitude. '
+                          'Used in approximation of percentile point to use for gradient thresholding')
+    }
+
+
 all_argsets = [
     NumClass, Seed, Architecture, DataArgs, InitModelPath, FinalModelPath, TrainingArgs,
     ModelInitArgs, TrainRefModelArgs, RetrainingArgs, SharedPruneArgs, PruneInitArgs, PruneFinalArgs,
-    ExperimentArgs
+    ExperimentArgs, SparseTrainingArgs
 ]
