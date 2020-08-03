@@ -133,6 +133,11 @@ class HookHandle:
             self.handle = None
         self.active = False
 
+    def remove(self):
+        if self.handle:
+            self.handle.remove()
+        self.handle = None
+
     def set_name(self, name):
         self.name = name
 
@@ -175,9 +180,9 @@ class HookManager:
         self.output_grad_cache = {}  # caches intermediate gradient tensors of module outputs
 
     def __del__(self):
-        self._cleanup()
+        self.cleanup()
 
-    def _cleanup(self):
+    def cleanup(self):
         self.num_module_inputs = {}
         self.valid_module_params = {}
         self.input_cache = {}

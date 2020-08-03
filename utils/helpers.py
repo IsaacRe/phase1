@@ -105,10 +105,12 @@ class CustomContext:
 
     def __init__(self, enter_fns=[], exit_fns=[], handle_exc_vars=False):
         if not handle_exc_vars:
-            for i, fn in enumerate(exit_fns):
-                def fn_(*exc_args):
-                    return fn()
-                exit_fns[i] = fn_
+            new_exit_fns = []
+            for fn in exit_fns:
+                new_exit_fns += [self.wrap_exit_fn(fn)]
+            for fn_ in new_exit_fns:
+                fn_()
+            exit_fns = new_exit_fns
         self.enter_fns = enter_fns
         self.exit_fns = exit_fns
 
@@ -119,6 +121,12 @@ class CustomContext:
     def __exit__(self, *exc_vars):
         for fn in self.exit_fns:
             fn(*exc_vars)
+
+    @staticmethod
+    def wrap_exit_fn(fn):
+        def new_fn(*exc_vars):
+            return fn()
+        return new_fn
 
     def merge_context(self, context, inplace: bool = False):
         assert hasattr(context, '__enter__') and hasattr(context, '__exit__'), \
