@@ -17,8 +17,8 @@ def increment_name(name):
     return name + '_1'
 
 
-def detach_hook(module, inp, out):
-    return out.detach()
+def detach_hook(module, input, output):
+    return output.detach()
 
 
 class HookFunction:
