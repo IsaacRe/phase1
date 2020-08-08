@@ -26,7 +26,7 @@ def _check_args():
     args = set()
     for ArgClass in all_argsets:
         for name, arg in ArgClass.ARGS.items():
-            if name in argnames:
+            while name in argnames:
                 name += ' '
             if arg in args:
                 continue
@@ -45,6 +45,10 @@ class Argument:
     def __init__(self, *flags: Text, **kwargs):
         self.flags = flags
         self.kwargs = kwargs
+
+    def __repr__(self):
+        return "Argument(%s, %s)" % (', '.join(self.flags),
+                                     ', '.join(['%s=%s' % (k, str(v)) for k, v in self.kwargs.items()]))
 
 
 class CustomParser(ArgumentParser):
@@ -112,6 +116,21 @@ class DataArgs(NumClass):
             Argument('--batch-size-test', type=int, default=100, help='batch size for testing'),
         'num_workers':
             Argument('--num-workers', type=int, default=4, help='number of dataloader workers')
+    }
+
+
+class FeatureDataArgs(DataArgs):
+    ARGS = {
+        'layer':
+            Argument('--layer', type=str, default=None, help='layer at which to extract features for dataset'),
+        'load_features_train':
+            Argument('--load-features-train', type=str, default=None, help='path to trainset feature data to load'),
+        'save_features_train':
+            Argument('--save-features-train', type=str, default=None, help='path to save trainset feature data to'),
+        'load_features_test':
+            Argument('--load-features-test', type=str, default=None, help='path to testset feature data to load'),
+        'save_features_test':
+            Argument('--save-features-test', type=str, default=None, help='path to save testset feature data to')
     }
 
 
@@ -259,8 +278,19 @@ class SparseTrainingArgs(TrainingArgs):
     }
 
 
+# Arguments exclusively for distributed_processing.py
+
+
+class DistributedTrainingArgs(TrainingArgs):
+    ARGS = {
+        'model_save_path':
+            Argument('--distributed-model-path', type=str, default='models/distributed-model.pth',
+                     help='path to save the distributed model to')
+    }
+
+
 all_argsets = [
     NumClass, Seed, Architecture, DataArgs, InitModelPath, FinalModelPath, TrainingArgs,
-    ModelInitArgs, TrainRefModelArgs, RetrainingArgs, SharedPruneArgs, PruneInitArgs, PruneFinalArgs,
-    ExperimentArgs, SparseTrainingArgs
+    ModelInitArgs, TrainRefModelArgs, RetrainingArgs, DistributedTrainingArgs, SharedPruneArgs, PruneInitArgs, PruneFinalArgs,
+    ExperimentArgs, SparseTrainingArgs, FeatureDataArgs
 ]
