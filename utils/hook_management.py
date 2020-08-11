@@ -314,8 +314,11 @@ class HookManager:
 
     def _have_all_gradients(self, module):
         have_input_grads = len(self.input_grad_cache[module.name]) == self.num_module_inputs[module.name]
+        #print('Gradient computed for %d/%d module inputs' % (len(self.input_grad_cache[module.name]), self.num_module_inputs[module.name]))
         have_param_grads = all([param in self.param_grad_cache[module.name] for param in
                                 self.valid_module_params[module.name]])
+        #print('Gradient not computed for params: %s' % ', '.join([p for p in self.valid_module_params[module.name]
+        #                                                          if p not in self.param_grad_cache[module.name]]))
         return have_input_grads and have_param_grads
 
     def _make_backward_hook_input(self, module):
