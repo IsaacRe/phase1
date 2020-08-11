@@ -289,8 +289,24 @@ class DistributedTrainingArgs(TrainingArgs):
     }
 
 
+# Arguments exclusively for gradient alignment experiment
+
+
+class GradAlignmentArgs(TrainingArgs):
+    ARGS = {
+        'test_epochs':
+            Argument('--test-epochs', type=int, nargs='+', default=[0, 1, 5, 20, 60, 120, 160],
+                     help='epochs to test for gradient alignment'),
+        'test_layers':
+            Argument('--test-layers', type=str, nargs='+',
+                     default=['conv1', 'layer1.0.conv1', 'layer2.0.conv1', 'layer4.0.conv1', 'layer4.1.conv2'],
+                     help='layers to track gradient alignment for')
+    }
+
+
 all_argsets = [
     NumClass, Seed, Architecture, DataArgs, InitModelPath, FinalModelPath, TrainingArgs,
-    ModelInitArgs, TrainRefModelArgs, RetrainingArgs, DistributedTrainingArgs, SharedPruneArgs, PruneInitArgs, PruneFinalArgs,
+    ModelInitArgs, TrainRefModelArgs, RetrainingArgs, DistributedTrainingArgs, GradAlignmentArgs,
+    SharedPruneArgs, PruneInitArgs, PruneFinalArgs,
     ExperimentArgs, SparseTrainingArgs, FeatureDataArgs
 ]
